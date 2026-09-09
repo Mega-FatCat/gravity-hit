@@ -1,0 +1,16 @@
+import {_electron as electron} from 'playwright-core';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+const args=process.argv.slice(2),out=path.resolve(args[0]||'../../qa/round1');await fs.mkdir(out,{recursive:true});
+const app=await electron.launch({args:['.','--qa'],executablePath:path.resolve('node_modules/electron/dist/electron.exe'),timeout:90000});
+const page=await app.firstWindow();const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
+await page.waitForFunction(()=>!!window.__game,{timeout:180000});await page.waitForTimeout(2000);
+await page.screenshot({path:path.join(out,'01-arrival.png')});
+await page.evaluate(()=>{window.__game.begin();window.__game.setState({phase:'collect',mode:'idle',picked:[],stock:10,water:0,cap:true,prep:0,tutorial:true,smoke:0,bud:0,embers:0,residue:0});});await page.waitForTimeout(2500);await page.screenshot({path:path.join(out,'02-clearing.png')});
+await page.evaluate(()=>window.__game.setView(.65,-.2));await page.waitForTimeout(1200);await page.screenshot({path:path.join(out,'03-stream.png')});
+await page.evaluate(()=>window.__game.setView(-.75,.04));await page.waitForTimeout(1200);await page.screenshot({path:path.join(out,'04-forest.png')});
+await page.evaluate(()=>{window.__game.setView(0,-.265);window.__game.setState({phase:'free',mode:'ignite',prep:2,outlet:true,water:.58,bud:.8,cap:true,smoke:.27,embers:.5,tutorial:true});window.__game.input.seal=true;});await page.waitForTimeout(2000);await page.screenshot({path:path.join(out,'05-bottle.png')});
+await page.evaluate(()=>{window.__game.setState({phase:'heat',mode:'heat',prep:0,cap:false,heat:.5,angle:45,smoke:0,water:0,bud:0});window.__game.input.x=innerWidth*.52;window.__game.input.y=innerHeight*.47;});await page.waitForTimeout(1400);await page.screenshot({path:path.join(out,'06-lighter-and-pipe.png')});
+await page.evaluate(()=>{window.__game.setState({phase:'free',mode:'pack',prep:2,cap:false,water:0,stock:10,bud:0});});await page.waitForTimeout(1200);await page.screenshot({path:path.join(out,'07-bag.png')});
+await page.evaluate(()=>{window.__game.setState({phase:'free',mode:'fill',prep:2,cap:false,water:.5,stock:10,bud:1});});await page.waitForTimeout(1600);await page.screenshot({path:path.join(out,'08-refill.png')});
+const metrics=await page.evaluate(()=>window.__game.metrics());await fs.writeFile(path.join(out,'runtime.json'),JSON.stringify({metrics,errors},null,2));console.log(JSON.stringify({out,metrics,errors},null,2));await app.close();

@@ -1,0 +1,24 @@
+const {app,BrowserWindow,ipcMain,session}=require('electron');
+const path=require('node:path');const fs=require('node:fs/promises');
+const qa=process.argv.includes('--qa');
+const benchmark=process.argv.includes('--benchmark');
+const portableRoot=qa?path.resolve(__dirname,'../qa-data',process.argv.includes('--qa-persist')?'persistent-check':String(process.pid)):app.isPackaged?path.dirname(process.execPath):path.resolve(__dirname,'../portable-data');
+app.setPath('userData',path.join(portableRoot,'UserData'));
+app.commandLine.appendSwitch('autoplay-policy','no-user-gesture-required');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-features','CalculateNativeWinOcclusion');
+let win;
+app.whenReady().then(async()=>{
+ session.defaultSession.setPermissionRequestHandler((wc,permission,callback)=>callback(false));
+ win=new BrowserWindow({width:1440,height:900,minWidth:960,minHeight:640,backgroundColor:'#142016',show:!qa,focusable:!benchmark,autoHideMenuBar:true,title:'STILLWATER',webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false,offscreen:qa&&!benchmark}});
+ if(qa&&!benchmark)win.webContents.setFrameRate(60);
+ win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+ win.webContents.on('will-navigate',(e,url)=>{if(!url.startsWith('file://')&&!url.startsWith('http://127.0.0.1:5173'))e.preventDefault();});
+ ipcMain.handle('save:load',async()=>{try{return JSON.parse(await fs.readFile(path.join(portableRoot,'UserData','progress.json'),'utf8'));}catch{return null;}});
+ let saveQueue=Promise.resolve();ipcMain.handle('save:write',(_,data)=>{saveQueue=saveQueue.catch(()=>{}).then(async()=>{const json=JSON.stringify(data);if(json.length>50000)throw Error('Save data too large');const dir=path.join(portableRoot,'UserData');await fs.mkdir(dir,{recursive:true});const target=path.join(dir,'progress.json');await fs.writeFile(target+'.tmp',json);await fs.rename(target+'.tmp',target);});return saveQueue;});
+ ipcMain.handle('window:fullscreen',()=>win.setFullScreen(!win.isFullScreen()));
+ if(process.argv.includes('--dev'))await win.loadURL('http://127.0.0.1:5173'+(qa?'?qa=1':''));else await win.loadFile(path.join(__dirname,'dist','index.html'),{query:qa?{qa:'1'}:{}});
+ if(benchmark)win.showInactive();
+});
+app.on('window-all-closed',()=>app.quit());

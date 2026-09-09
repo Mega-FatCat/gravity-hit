@@ -1,0 +1,6 @@
+import fs from 'node:fs/promises';import path from 'node:path';
+const id='shrub_04',root=path.resolve('public/assets',id);await fs.mkdir(root,{recursive:true});
+const data=await(await fetch(`https://api.polyhaven.com/files/${id}`)).json();await fs.writeFile('../../work/shrub-files.json',JSON.stringify(data));const spec=data.gltf['1k'].gltf;console.log('Model',spec.size,'included',Object.values(spec.include).reduce((s,v)=>s+v.size,0));
+for(const [name,obj]of [[`${id}.gltf`,spec],...Object.entries(spec.include)]){await fs.mkdir(path.dirname(path.join(root,name)),{recursive:true});const response=await fetch(obj.url);if(!response.ok)throw Error(response.status);await fs.writeFile(path.join(root,name),Buffer.from(await response.arrayBuffer()));console.log(name);}
+const sources=JSON.parse(await fs.readFile('public/assets/sources.json'));sources.push({id,source:`https://polyhaven.com/a/${id}`,license:'CC0',resolution:'1k'});await fs.writeFile('public/assets/sources.json',JSON.stringify(sources,null,2));
+const hdr=await(await fetch('https://api.polyhaven.com/files/forest_slope')).json();const resp=await fetch(hdr.hdri['4k'].hdr.url);await fs.writeFile('public/assets/forest.hdr',Buffer.from(await resp.arrayBuffer()));console.log('4k lighting downloaded');

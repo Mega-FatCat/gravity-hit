@@ -1,0 +1,145 @@
+[
+  {
+    "id": "forest_slope",
+    "source": "https://polyhaven.com/a/forest_slope",
+    "license": "CC0",
+    "resolution": "2k"
+  },
+  {
+    "id": "fern_02",
+    "source": "https://polyhaven.com/a/fern_02",
+    "license": "CC0",
+    "format": "gltf",
+    "resolution": "2k",
+    "runtimeDerivatives": [
+      "fern_02_lod.glb"
+    ]
+  },
+  {
+    "id": "pine_tree_01",
+    "source": "https://polyhaven.com/a/pine_tree_01",
+    "license": "CC0",
+    "format": "gltf",
+    "resolution": "1k"
+  },
+  {
+    "id": "bark_brown_02",
+    "source": "https://polyhaven.com/a/bark_brown_02",
+    "license": "CC0",
+    "resolution": "2k"
+  },
+  {
+    "id": "rock_boulder_dry",
+    "source": "https://polyhaven.com/a/rock_boulder_dry",
+    "license": "CC0",
+    "resolution": "2k"
+  },
+  {
+    "id": "leaves_forest_ground",
+    "source": "https://polyhaven.com/a/leaves_forest_ground",
+    "license": "CC0",
+    "resolution": "2k"
+  },
+  {
+    "id": "shrub_04",
+    "source": "https://polyhaven.com/a/shrub_04",
+    "license": "CC0",
+    "resolution": "1k",
+    "runtimeDerivatives": [
+      "shrub_04_lod.glb"
+    ]
+  },
+  {
+    "id": "rock_moss_set_01",
+    "source": "https://polyhaven.com/a/rock_moss_set_01",
+    "license": "CC0",
+    "resolution": "2k",
+    "runtimeDerivatives": [
+      "creek_rocks_lod.glb"
+    ]
+  },
+  {
+    "id": "shrub_01",
+    "source": "https://polyhaven.com/a/shrub_01",
+    "license": "CC0",
+    "resolution": "2k"
+  },
+  {
+    "id": "grass_medium_01",
+    "source": "https://polyhaven.com/a/grass_medium_01",
+    "license": "CC0",
+    "resolution": "2k",
+    "runtimeDerivatives": [
+      "grass_clumps_lod.glb",
+      "grass_far_lod.glb"
+    ]
+  },
+  {
+    "id": "shrub_02",
+    "source": "https://polyhaven.com/a/shrub_02",
+    "license": "CC0",
+    "resolution": "2k",
+    "runtimeDerivatives": [
+      "shrub_02_lod.glb"
+    ]
+  },
+  {
+    "id": "shrub_03",
+    "source": "https://polyhaven.com/a/shrub_03",
+    "license": "CC0",
+    "resolution": "2k",
+    "runtimeDerivatives": [
+      "shrub_03_lod.glb"
+    ]
+  },
+  {
+    "id": "tree_stump_01",
+    "source": "https://polyhaven.com/a/tree_stump_01",
+    "license": "CC0",
+    "resolution": "2k"
+  },
+  {
+    "id": "dry_branches_medium_01",
+    "source": "https://polyhaven.com/a/dry_branches_medium_01",
+    "license": "CC0",
+    "resolution": "2k"
+  },
+  {
+    "id": "dead_tree_trunk",
+    "source": "https://polyhaven.com/a/dead_tree_trunk",
+    "license": "CC0",
+    "resolution": "2k",
+    "runtimeDerivatives": [
+      "dead_tree_trunk_lod.glb"
+    ]
+  },
+  {
+    "id": "fir_sapling",
+    "source": "https://polyhaven.com/a/fir_sapling",
+    "license": "CC0",
+    "resolution": "1k",
+    "runtimeDerivatives": [
+      "fir_sapling_lod.glb",
+      "fir_far_lod.glb"
+    ]
+  },
+  {
+    "id": "forrest_ground_01",
+    "source": "https://polyhaven.com/a/forrest_ground_01",
+    "license": "CC0",
+    "resolution": "2k"
+  },
+  {
+    "id": "grass_clumps_lod",
+    "source": "https://polyhaven.com/a/grass_medium_01",
+    "license": "CC0",
+    "resolution": "2k",
+    "derivative": "Local build_grass_lod.py retains all 17 variants and reduces larger clumps to 1800 triangles. Original files retained."
+  },
+  {
+    "id": "sandy_gravel",
+    "source": "https://polyhaven.com/a/sandy_gravel",
+    "license": "CC0",
+    "resolution": "2k"
+  }
+]
