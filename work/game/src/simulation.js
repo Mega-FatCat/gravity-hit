@@ -7,11 +7,11 @@ export class Simulation {
  get burning(){return this.embers>.08&&this.bud>0;}
  get smokeDensity(){return clamp(this.smoke/Math.max(.08,1-this.water));}
  isHeld(id){return this.held===id||this.supporting===id;}
- // A selection retains an already-owned companion, never silently acquires one.
- // Exchanging tools puts any object that no longer fits either hand onto the slab.
- select(id){
+ // A selection retains an already-owned companion when the current action can
+ // physically use the pair. Exchanging tools puts anything else on the slab.
+ select(id,allowedCompanions=null){
   if(!['bottle','pipe','lighter','bag'].includes(id))return false;
-  const companions=id==='pipe'?['bag','bottle']:id==='bottle'||id==='bag'?['pipe']:['bottle','pipe'];
+  const companions=allowedCompanions??(id==='pipe'?['bag','bottle']:id==='bottle'||id==='bag'?['pipe']:['bottle','pipe']);
   const support=companions.find(item=>item!==id&&this.isHeld(item)&&!(item==='pipe'&&this.cap&&this.prep>0));
   this.held=id;this.supporting=support||null;this.mode='idle';
   if(!this.picked.includes(id))this.picked.push(id);
@@ -24,18 +24,17 @@ export class Simulation {
   if(['press','unscrew','screw','uncap'].includes(this.mode))return false;
   if(this.phase==='collect'||this.phase==='heat'){
    if(!['pipe','lighter'].includes(id))return this.say('Select the glass pipe and lighter first.');
-   this.select(id);
-   if(this.picked.includes('pipe')&&this.picked.includes('lighter'))this.phase='heat';
+   this.select(id,['pipe','lighter']);
+   if(this.isHeld('pipe')&&this.isHeld('lighter')){this.phase='heat';this.held='lighter';this.supporting='pipe';}
    if(this.phase==='heat'&&this.held==='lighter'&&this.supporting==='pipe'){this.mode='heat';this.say('Both pieces are in hand. Bring the flame to the lower glass tip.');}
    else if(this.phase==='heat')this.say('Keep the pipe in hand, then select the lighter.');
    return true;
   }
   if(this.phase==='press'){
-   if(id==='pipe')return this.select(id);
-   if(id!=='bottle')return this.say('Hold the warm pipe, then select the bottle.');
-   this.select('bottle');
-   if(this.supporting!=='pipe')return this.say('Select the warm pipe, then the bottle to fit its cap.');
-   this.mode='press';return true;
+   if(!['pipe','bottle'].includes(id))return this.say('Hold the warm pipe, then select the bottle.');
+   this.select(id,['pipe','bottle']);
+   if(!this.isHeld('pipe')||!this.isHeld('bottle'))return this.say('Select the warm pipe, then the bottle to fit its cap.');
+   this.held='bottle';this.supporting='pipe';this.mode='press';return true;
   }
   if(this.phase==='unscrew'){
    if(id!=='bottle')return this.say('Select the bottle and hold A to unscrew the cap.');
@@ -43,13 +42,14 @@ export class Simulation {
   }
   if(this.phase==='hole'){
    if(!['bottle','lighter'].includes(id))return this.say('Hold the bottle, then select the lighter for the lower opening.');
-   this.select(id);
-   if(this.held==='lighter'&&this.supporting==='bottle')this.mode='hole';
+   this.select(id,['bottle','lighter']);
+   if(this.isHeld('lighter')&&this.isHeld('bottle')){this.held='lighter';this.supporting='bottle';this.mode='hole';}
    else this.say('Keep the bottle in hand, then select the lighter.');
    return true;
   }
   if(this.phase!=='free')return false;
   if(id==='bag'||id==='pack'||id==='pipe'){
+   if(this.prep<2||!this.outlet)return this.say('Finish preparing the bottle before starting the ritual.');
    if(id==='pipe'&&this.cap)return this.say('The pipe is attached. Unscrew the cap with A first.');
    if(id==='pipe'&&this.isHeld('bottle')&&!this.cap&&this.prep>0){
     this.held='bottle';this.supporting='pipe';this.mode='screw';this.progress=0;
@@ -60,7 +60,7 @@ export class Simulation {
     return true;
    }
    const selectTarget=id==='pack'?'bag':id;
-   this.select(selectTarget);
+   this.select(selectTarget,['pipe','bag']);
    if(this.cap)return this.say('Unscrew the cap before loading the pipe.');
    if(this.bud>0)return this.say('The pipe is already loaded.');
    if(this.stock<=0)return this.say('The bag is empty.');
@@ -70,6 +70,7 @@ export class Simulation {
    this.mode='pack';if(this.upgraded)this.pack(true);return true;
   }
   if(id==='stream'){
+   if(this.prep<2||!this.outlet)return this.say('Finish preparing the bottle before collecting water.');
    if(!this.isHeld('bottle'))return this.say('Pick up the bottle first, then target the stream.');
    if(this.cap)return this.say('Unscrew the cap before refilling.');
    this.mode='fill';this.progress=0;
@@ -77,6 +78,7 @@ export class Simulation {
    return true;
   }
   if(id==='bottle'){
+   if(this.prep<2||!this.outlet)return this.say('Finish preparing the bottle before turning the cap.');
    const wasPipe=this.held==='pipe',selected=this.held==='bottle';this.select('bottle');
    if(!selected){
     if(wasPipe&&!this.cap&&this.prep>0){
@@ -94,6 +96,7 @@ export class Simulation {
    return true;
   }
   if(id==='lighter'){
+   if(this.prep<2||!this.outlet){this.select('lighter');return this.say('Finish preparing the bottle before heating it.');}
    this.select('lighter');
    if(!this.cap)return this.say('Attach the cap and pipe to the bottle first.');
    if(this.water<=.072)return this.say('No water remains above the outlet. Refill at the stream.');
@@ -105,11 +108,12 @@ export class Simulation {
   if(id==='hit'){
    if(!this.isHeld('bottle'))return this.say('Pick up the bottle before taking the hit.');
    if(this.cap)return this.say('Unscrew the cap first.');
+   if(!this.outlet)return this.say('Form the lower outlet before taking the hit.');
    if(this.smoke<.015)return this.say('There is no trapped smoke to take.');
    if(this.mode==='fill')return this.say('Finish collecting water before taking the hit.');
    this.lastQuality=clamp(this.smoke*1.7)*(this.water>=.1&&this.water<=.22?1:.72);
    this.cough=(this.water<.1?1:.28)*(this.upgraded?.35:1);
-   this.phase='inhale';this.transition=0;this.mode='idle';this.hits++;this.residue=clamp(this.residue+.07);this.busy=.3;return true;
+   this.phase='inhale';this.transition=0;this.mode='idle';this.hits++;this.residue=clamp(this.residue+.015);this.busy=.3;return true;
   }
   return false;
  }
@@ -124,7 +128,7 @@ export class Simulation {
  }
  pack(success){
   // A delayed pointer-up after cancel or tool exchange cannot consume a charge.
-  if(this.phase!=='free'||this.mode!=='pack'||!['pipe','bag'].includes(this.held)||this.stock<=0||this.bud>0||this.cap)return false;
+  if(this.phase!=='free'||this.mode!=='pack'||this.prep<2||!this.outlet||!['pipe','bag'].includes(this.held)||this.stock<=0||this.bud>0||this.cap)return false;
   this.stock--;if(success){this.bud=1;this.say('Pipe loaded. One charge used.');}else{this.lost++;this.say('Missed. That charge is lost.');}
   this.mode='idle';return true;
  }
@@ -166,14 +170,31 @@ export class Simulation {
     if(this.progress>=1&&!this.cap)this.setCap(true);
     else if(this.progress<=0&&this.cap)this.setCap(false);
    }
-   const automatic=this.mode==='auto'&&this.held==='lighter'&&this.isHeld('bottle')&&this.cap&&this.bud>0;
-   const lighting=automatic?1:this.mode==='ignite'&&this.cap?this.flameQuality:0;
-   this.embers=clamp(this.embers+(this.bud>0?lighting*dt*2:0)-dt*.12);
    const sealed=!!(input.seal||this.seal);
    this.flow=0;
    if(this.outlet&&!sealed&&this.water>.072&&this.mode!=='fill'){
     this.flow=Math.min(this.water-.072,dt*.15*Math.sqrt(this.water-.072));this.water-=this.flow;
-    if(this.cap&&this.bud>0&&this.embers>.08){const burned=Math.min(this.bud,this.flow*(.7+.25*this.embers));this.bud-=burned;this.smoke=clamp(this.smoke+Math.min(this.flow*this.embers*.78,burned),0,1-this.water);}
+   }
+   const automatic=this.mode==='auto'&&this.held==='lighter'&&this.isHeld('bottle')&&this.cap&&this.bud>0;
+   const lighting=automatic?1:this.mode==='ignite'&&this.cap?this.flameQuality:0;
+   const draft=dt>0?this.flow/dt:0;
+   const flameRate=lighting>0&&this.bud>0?lighting*.9*(1.1-this.embers*.3):0;
+   const stokeRate=(draft>0&&this.embers>.08&&this.bud>0)?draft*2.5*this.embers*(1-this.embers*.2):0;
+   const coolRate=(lighting>0?.06:(draft>0?.08:.22))*this.embers;
+   this.embers=clamp(this.embers+(flameRate+stokeRate-coolRate)*dt);
+   if(this.bud<=0)this.embers=0;
+   if(this.outlet&&!sealed&&this.flow>0&&this.cap&&this.bud>0&&this.embers>.08){
+    const embNorm=Math.max(0,(this.embers-.08)/.92);
+    const headspace=1-this.water;
+    const availableHeadspace=Math.max(0,.928-this.smoke);
+    const midPeak=.55+.55*Math.sin(Math.min(Math.PI,headspace/.928*Math.PI));
+    const headroomFactor=Math.min(1,availableHeadspace/.18+.1);
+    const yieldFactor=midPeak*Math.pow(embNorm,1.2)*headroomFactor;
+    const burned=Math.min(this.bud,this.flow*(.6+.4*this.embers));
+    this.bud-=burned;
+    const smokeGen=Math.min(this.flow*yieldFactor*.95,burned);
+    this.smoke=clamp(this.smoke+smokeGen,0,1-this.water);
+    this.residue=clamp(this.residue+burned*.085);
    }
    if(lighting>0&&this.bud>0)this.bud=Math.max(0,this.bud-lighting*dt*.002);
    if(!this.cap){this.smoke=Math.max(0,this.smoke-dt*.035);this.embers=Math.max(0,this.embers-dt*.3);}

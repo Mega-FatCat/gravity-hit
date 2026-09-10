@@ -47,6 +47,118 @@ outgoingLight=mix(outgoingLight,pipeEdgeTone,pipeGrazing*.24);
  material.customProgramCacheKey=()=>`borosilicate-edge-v4`;
 }
 
+let lastDrawnResidue=-1;
+function updatePipeResidueTexture(canvas,ctx,texture,residue){
+ if(Math.abs(lastDrawnResidue-residue)<0.002)return;
+ lastDrawnResidue=residue;
+ const width=canvas.width,height=canvas.height;
+ const imgData=ctx.createImageData(width,height);
+ const data=imgData.data;
+
+ let seed=4219;
+ function rnd(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;}
+
+ const droplets=[];
+ for(let i=0;i<80;i++){
+  droplets.push({theta:rnd()*Math.PI*2,v:0.30+rnd()*0.65,radius:0.016+rnd()*0.038,strength:0.6+rnd()*0.4});
+ }
+
+ if(residue>0.003){
+  for(let y=0;y<height;y++){
+   const v=y/(height-1);
+   let baseAffinity=0,sootBase=0;
+   if(v<0.36){
+    const rim=Math.max(0,1-v/0.07);
+    baseAffinity=0.74+0.16*Math.sin(v*14.0)+rim*0.18;
+    sootBase=0.65+0.35*Math.max(0,1-v/0.36)+rim*0.25;
+   }else if(v<0.54){
+    const pinchDist=Math.abs(v-0.46)/0.08;
+    baseAffinity=0.88+0.12*Math.max(0,1-pinchDist);
+    sootBase=0.45*Math.max(0,1-pinchDist);
+   }else{
+    const stemT=(v-0.54)/0.46;
+    baseAffinity=0.68*Math.pow(Math.max(0,1-stemT*0.72),1.2)+0.12;
+    sootBase=0.05*Math.max(0,1-stemT*3.0);
+   }
+   for(let x=0;x<width;x++){
+    const u=x/width,theta=u*Math.PI*2;
+    const c=Math.cos(theta),s=Math.sin(theta);
+    const w1=Math.sin(theta*3.0+1.2+Math.sin(v*5.0)*0.5);
+    const w2=Math.sin(theta*6.0-0.8+Math.cos(v*7.0)*0.6);
+    const w3=Math.cos(theta*10.0+2.4+Math.sin(v*11.0)*0.4);
+    const flowStreaks=0.5+0.25*w1+0.15*w2+0.10*w3;
+    const fine1=Math.sin(theta*24.0+Math.sin(v*28.0)*0.7+c*2.0);
+    const fine2=Math.cos(theta*36.0+Math.cos(v*40.0)*0.5+s*2.0);
+    const fineStreaks=0.5+0.30*fine1+0.20*fine2;
+    let dropAcc=0;
+    for(let k=0;k<droplets.length;k++){
+     const dp=droplets[k];
+     let dTheta=Math.abs(theta-dp.theta);
+     if(dTheta>Math.PI)dTheta=Math.PI*2-dTheta;
+     const dv=(v-dp.v)*2.2;
+     const d=Math.sqrt((dTheta*0.7)*(dTheta*0.7)+dv*dv)/dp.radius;
+     if(d<1.0){const w=1.0-d*d;dropAcc+=w*w*dp.strength;}
+    }
+    dropAcc=Math.min(1.0,dropAcc);
+    const ashGrain=(Math.sin(c*65.0+v*120.0)*Math.cos(s*75.0-v*95.0)+1.0)*0.5;
+    const soot=Math.min(1.0,sootBase*(0.75+0.25*ashGrain));
+    let affinity=baseAffinity*(0.58+0.42*flowStreaks);
+    affinity=Math.min(1.0,affinity+dropAcc*0.38);
+    const localAffinity=affinity*0.62+dropAcc*0.26+fineStreaks*0.12;
+    const onset=(1.0-localAffinity)*0.40;
+    const deposit=Math.min(1.0,Math.max(0,(residue-onset)/(1.0-onset*0.6)));
+    const smoothDeposit=deposit*deposit*(3-2*deposit);
+    const thickness=smoothDeposit*(localAffinity*0.60+0.40)*Math.min(1.0,Math.pow(residue,0.88)*1.15);
+    if(thickness>0.004){
+     let rCol,gCol,bCol;
+     if(thickness<0.26){
+      const t=thickness/0.26;
+      rCol=192*(1-t)+156*t;gCol=128*(1-t)+88*t;bCol=46*(1-t)+24*t;
+     }else if(thickness<0.60){
+      const t=(thickness-0.26)/0.34;
+      rCol=156*(1-t)+96*t;gCol=88*(1-t)+42*t;bCol=24*(1-t)+12*t;
+     }else if(thickness<0.84){
+      const t=(thickness-0.60)/0.24;
+      rCol=96*(1-t)+42*t;gCol=42*(1-t)+18*t;bCol=12*(1-t)+8*t;
+     }else{
+      const t=Math.min(1.0,(thickness-0.84)/0.16);
+      rCol=42*(1-t)+16*t;gCol=18*(1-t)+8*t;bCol=8*(1-t)+5*t;
+     }
+     const sootFactor=soot*Math.min(1.0,Math.max(0,(residue-0.30)/0.60))*Math.min(1.0,Math.max(0,(thickness-0.18)/0.52));
+     rCol=rCol*(1-sootFactor*0.90)+8*(sootFactor*0.90);
+     gCol=gCol*(1-sootFactor*0.90)+7*(sootFactor*0.90);
+     bCol=bCol*(1-sootFactor*0.90)+6*(sootFactor*0.90);
+     let a;
+     if(thickness<0.20){
+      a=thickness*1.35;
+     }else if(thickness<0.60){
+      a=0.27+(thickness-0.20)/0.40*(0.62-0.27);
+     }else{
+      a=0.62+(thickness-0.60)/0.40*(0.88-0.62);
+     }
+     a=Math.min(0.92,a+sootFactor*0.14);
+     const idx=(y*width+x)*4;
+     data[idx]=Math.round(rCol);
+     data[idx+1]=Math.round(gCol);
+     data[idx+2]=Math.round(bCol);
+     data[idx+3]=Math.round(a*255);
+    }
+   }
+  }
+ }
+ ctx.putImageData(imgData,0,0);
+ texture.needsUpdate=true;
+}
+
+function createPipeResidueTexture(world){
+ const canvas=document.createElement('canvas');canvas.width=512;canvas.height=1024;
+ const ctx=canvas.getContext('2d');
+ const texture=new T.CanvasTexture(canvas);texture.colorSpace=T.SRGBColorSpace;texture.anisotropy=8;
+ world.pipeResidueCanvas=canvas;world.pipeResidueCtx=ctx;world.pipeResidueTexture=texture;
+ updatePipeResidueTexture(canvas,ctx,texture,0);
+ return texture;
+}
+
 function rebuildPipe(world){
  const pipe=world.items.pipe,capMaterial=world.capmesh.material;
  const keep=new Set([world.hotTip,world.bowlBud,world.emberLight]);
@@ -77,9 +189,16 @@ function rebuildPipe(world){
  world.capmesh.geometry.dispose();world.capmesh.geometry=lathe([[.00370,.006],[.0125,.006],[.0132,.005],[.0132,-.006],[.0128,-.007],[.0122,-.007],[.0122,.004],[.00370,.004],[.00370,.006]],80);
  capMaterial.color.set('#365546');capMaterial.roughness=.5;
  world.pipeGrommet=add(pipe,'Cap aperture seal',lathe([[.00315,.005],[.00445,.005],[.00475,.006],[.00478,.007],[.00460,.008],[.00328,.008],[.00315,.005]],64,true),new T.MeshStandardMaterial({color:'#262b27',roughness:.7}));
- // Localized residue on the interior, scaled to the new bore.
- const residueMaterial=new T.MeshStandardMaterial({color:'#462a10',roughness:.47,transparent:true,opacity:0,depthWrite:false,side:T.DoubleSide});
- const residue=add(pipe,'Inner amber residue',lathe([[.00282,-.034],[.00284,.015],[.00180,.021],[.00140,.023],[.00180,.026],[.00380,.030],[.00430,.034],[.00445,.037]],64),residueMaterial);residue.renderOrder=4;residue.userData.pickable=false;
+ // Localized progressive residue along the entire interior bore (bowl rim to mouthpiece).
+ const residueProfile=[
+  [.00456,.0465],[.00425,.0454],[.00395,.0432],[.00355,.0397],
+  [.00311,.0357],[.00286,.0317],[.00267,.0287],[.00266,.0238],
+  [.00264,.0168],[.00264,.0000],[.00264,-.0150],[.00264,-.0325],
+  [.00266,-.0425],[.00290,-.0484]
+ ];
+ const residueTexture=createPipeResidueTexture(world);
+ const residueMaterial=new T.MeshStandardMaterial({map:residueTexture,roughness:.38,metalness:.02,transparent:true,opacity:1,depthWrite:false,side:T.DoubleSide});
+ const residue=add(pipe,'Inner amber residue',lathe(residueProfile,64),residueMaterial);residue.renderOrder=4;residue.userData.pickable=false;
  world.pipeResidue=residue;
  world.hotTip.geometry.dispose();world.hotTip.geometry=lathe([[.00315,-.004],[.00355,-.004],[.00355,.003],[.00315,.003]],48);world.hotTip.position.set(0,-.044,0);world.hotTip.userData.pickable=false;
  world.bowlBud.position.set(0,.040,0);world.bowlBud.scale.set(1.0,.65,1.0);world.bowlBud.userData.pickable=false;
@@ -149,24 +268,146 @@ function correctLighter(world){
  const lighter=world.items.lighter;
  const model=lighter.children.find(o=>o.isGroup&&o.getObjectByName('Body'));
  if(!model)return;
- // The imported model's longitudinal axis is local +Y. Rotating that axis
- // places the striker/actuator on screen-right and burner to its left.
+
  const bodyRoll=Math.PI*.72;model.rotation.set(0,bodyRoll,0);model.updateMatrix();
- const wheel=model.getObjectByName('Striker wheel')||model.getObjectByName('Striker_wheel');
- const lever=model.getObjectByName('Gas lever');if(lever)lever.position.set(-.004,.070,.002);
- // All teeth rotate with the flint wheel about its real axle. The imported
- // teeth were independent meshes, so rotating the cylinder alone did nothing
- // visible. The inner rotor's local X matches the existing ignition animation.
- if(wheel){
-  const spindle=new T.Group();spindle.name='Flint wheel axle frame';spindle.position.copy(wheel.position);spindle.rotation.y=Math.PI/2;model.add(spindle);
-  const rotor=new T.Group();rotor.name='Flint wheel and teeth';spindle.add(rotor);model.updateWorldMatrix(true,true);
-  const parts=[wheel,...model.children.filter(o=>o.name.startsWith('Wheel tooth'))];
-  for(const part of parts)rotor.attach(part);
-  world.wheel=rotor;
+
+ // Remove old misaligned meshes from imported model (handling sanitized names with underscores)
+ const keepFromModel=new Set([
+  'Body',
+  'Base_mould_seam','Base mould seam',
+  'Refill_valve','Refill valve',
+  'Refill_valve_recess','Refill valve recess',
+  'Upper_collar','Upper collar'
+ ]);
+ for(const child of [...model.children]){
+  const isOurWrap=child.name==='Right-hand-facing printed wrap';
+  if(!isOurWrap&&(!keepFromModel.has(child.name)||child.name==='Clipper top assembly')){
+   model.remove(child);
+   child.traverse(o=>{
+    const i=world.interactive.indexOf(o);
+    if(i>=0)world.interactive.splice(i,1);
+   });
+  }
  }
- for(const child of [...model.children])if(child.name==='Label'||child.material?.map===world.lighterDesign){
-  model.remove(child);world.interactive=world.interactive.filter(o=>o!==child);
+
+ // Materials for authentic Clipper lighter head
+ const polymerMat=new T.MeshStandardMaterial({color:'#141615',roughness:.35,metalness:.04});
+ const steelMat=new T.MeshStandardMaterial({color:'#b8bdc0',roughness:.20,metalness:.96,envMapIntensity:1.5});
+ const brassMat=new T.MeshStandardMaterial({color:'#caa046',roughness:.24,metalness:.88,envMapIntensity:1.4});
+ const darkSteelMat=new T.MeshStandardMaterial({color:'#36393b',roughness:.40,metalness:.88});
+ const flintMat=new T.MeshStandardMaterial({color:'#242526',roughness:.75,metalness:.15});
+
+ // Top assembly group aligned to world view:
+ // -X = Flame side (Windscreen Hood & Burner Nozzle) on screen-left
+ // +X = Actuator side (Gas Lever Thumb Pad) on screen-right
+ // Z  = Front-to-back axis (Wheel axle direction)
+ // Y  = Vertical axis (upward from lighter collar at Y = 0.062)
+ const topAssembly=new T.Group();
+ topAssembly.name='Clipper top assembly';
+ topAssembly.rotation.y=-bodyRoll; // Aligns top mechanism with the front view
+ model.add(topAssembly);
+
+ // 1. Burner Nozzle (machined brass valve seated inside the windscreen at -X)
+ const nozzleGroup=new T.Group();nozzleGroup.name='Burner valve assembly';
+ topAssembly.add(nozzleGroup);
+ const nozzleX=-.0036;
+ add(nozzleGroup,'Valve collar base',new T.CylinderGeometry(.0017,.0018,.0035,32),brassMat,V(nozzleX,.0638,0));
+ add(nozzleGroup,'Valve actuator collar',new T.CylinderGeometry(.0021,.0021,.0010,32),brassMat,V(nozzleX,.0655,0));
+ add(nozzleGroup,'Burner nozzle tube',new T.CylinderGeometry(.00115,.00125,.0065,32),brassMat,V(nozzleX,.0692,0));
+ const nozzleTip=add(nozzleGroup,'Burner nozzle orifice',new T.CylinderGeometry(.0013,.00115,.0015,32),brassMat,V(nozzleX,.0725,0));
+ add(nozzleGroup,'Burner orifice bore',new T.CylinderGeometry(.00065,.00065,.0012,16),darkSteelMat,V(nozzleX,.0728,0));
+
+ // 2. Stainless Steel Windscreen Hood (classic Clipper guard with vent ports)
+ const shieldGroup=new T.Group();shieldGroup.name='Windscreen hood assembly';
+ topAssembly.add(shieldGroup);
+ // The hood encloses the left (-X) half around the burner nozzle
+ const hoodArc=Math.PI*.92;
+ const hoodStart=Math.PI*1.5-hoodArc*.5;
+ const hoodGeo=new T.CylinderGeometry(.0078,.0079,.0135,48,1,true,hoodStart,hoodArc);
+ const hoodMesh=add(shieldGroup,'Steel windscreen guard',hoodGeo,steelMat,V(0,.06925,0));
+ hoodMesh.material.side=T.DoubleSide;
+ // Rolled fire-guard rim along top edge of windscreen
+ const rimPoints=[];
+ for(let i=0;i<=32;i++){
+  const th=hoodStart+(i/32)*hoodArc;
+  rimPoints.push(V(.0078*Math.sin(th),.0760,.0078*Math.cos(th)));
  }
+ add(shieldGroup,'Windscreen rolled rim',new T.TubeGeometry(new T.CatmullRomCurve3(rimPoints),32,.00035,8,false),steelMat);
+ // Ventilation slots on front and back flanks of the hood
+ const ventGeo=new T.BoxGeometry(.0018,.0026,.0002);
+ const thFront=Math.PI*1.5+.55;
+ const ventFront=add(shieldGroup,'Vent slot front',ventGeo,darkSteelMat,V(.00785*Math.sin(thFront),.0688,.00785*Math.cos(thFront)));
+ ventFront.rotation.y=-(thFront-Math.PI*.5);
+ const thBack=Math.PI*1.5-.55;
+ const ventBack=add(shieldGroup,'Vent slot back',ventGeo,darkSteelMat,V(.00785*Math.sin(thBack),.0688,.00785*Math.cos(thBack)));
+ ventBack.rotation.y=-(thBack-Math.PI*.5);
+
+ // 3. Flint Barrel & Stanchion Assembly (Clipper removable flint stanchion)
+ const flintX=.0006;
+ const barrelGroup=new T.Group();barrelGroup.name='Flint stanchion assembly';
+ topAssembly.add(barrelGroup);
+ add(barrelGroup,'Flint barrel column',new T.CylinderGeometry(.0023,.0025,.0088,32),polymerMat,V(flintX,.0665,0));
+ add(barrelGroup,'Flint guide bushing',new T.CylinderGeometry(.0016,.0016,.0014,24),brassMat,V(flintX,.0712,0));
+ // Vertical axle brackets (stanchion ears) holding the wheel axle along Z
+ add(barrelGroup,'Front stanchion ear',new T.BoxGeometry(.0036,.0074,.00075),polymerMat,V(flintX,.0745,.0026));
+ add(barrelGroup,'Back stanchion ear',new T.BoxGeometry(.0036,.0074,.00075),polymerMat,V(flintX,.0745,-.0026));
+ // Axle pin passing horizontally along Z through both stanchions and wheel center
+ const axleGeo=new T.CylinderGeometry(.00075,.00075,.0074,20);
+ axleGeo.rotateX(Math.PI*.5);
+ add(barrelGroup,'Striker wheel axle pin',axleGeo,steelMat,V(flintX,.0755,0));
+ const rivetGeo=new T.CylinderGeometry(.0011,.0011,.0004,16);
+ rivetGeo.rotateX(Math.PI*.5);
+ add(barrelGroup,'Axle rivet head front',rivetGeo,steelMat,V(flintX,.0755,.0037));
+ add(barrelGroup,'Axle rivet head back',rivetGeo,steelMat,V(flintX,.0755,-.0037));
+ // Spring-loaded flint stick emerging from tube and pressing against bottom of striker wheel
+ add(barrelGroup,'Spring-loaded flint stick',new T.CylinderGeometry(.0010,.0010,.0022,16),flintMat,V(flintX,.0722,0));
+
+ // 4. Striker Wheel & Knurled Teeth (rotates around Z-axle)
+ // Mount in axle frame so rotor.rotation.x rotates around the physical axle
+ const wheelMount=new T.Group();
+ wheelMount.name='Flint wheel axle frame';
+ wheelMount.position.set(flintX,.0755,0);
+ wheelMount.rotation.y=Math.PI*.5; // Maps rotor.rotation.x to the Z axle
+ topAssembly.add(wheelMount);
+
+ const rotor=new T.Group();
+ rotor.name='Flint wheel and teeth rotor';
+ wheelMount.add(rotor);
+
+ const wheelGeo=new T.CylinderGeometry(.0034,.0034,.0040,32);
+ wheelGeo.rotateZ(Math.PI*.5);
+ add(rotor,'Fluted striker wheel body',wheelGeo,darkSteelMat);
+ for(let i=0;i<24;i++){
+  const a=i/24*Math.PI*2;
+  const y=Math.cos(a)*.0034;
+  const z=Math.sin(a)*.0034;
+  const toothGeo=new T.BoxGeometry(.0040,.00030,.00044);
+  toothGeo.rotateX(a);
+  add(rotor,`Knurled tooth ${i}`,toothGeo,steelMat,V(0,y,z));
+ }
+ world.wheel=rotor;
+
+ // 5. Gas Lever (actuator rocker with ergonomic thumb pad and forward fork)
+ const leverGroup=new T.Group();leverGroup.name='Gas actuator lever';
+ topAssembly.add(leverGroup);
+ // Sloping thumb button pad at +X
+ const thumbPadGeo=new T.BoxGeometry(.0052,.0020,.0062);
+ thumbPadGeo.rotateZ(-.38);
+ add(leverGroup,'Thumb rest push pad',thumbPadGeo,polymerMat,V(.0054,.0684,0));
+ // Grip ridges across the thumb pad
+ for(let r=0;r<3;r++){
+  const ridgeGeo=new T.BoxGeometry(.00028,.00038,.0056);
+  ridgeGeo.rotateZ(-.38);
+  add(leverGroup,`Thumb pad grip ridge ${r}`,ridgeGeo,polymerMat,V(.0044+r*.0010,.0696-r*.0009,0));
+ }
+ // Lever column down to body deck
+ add(leverGroup,'Lever base pivot column',new T.BoxGeometry(.0040,.0060,.0056),polymerMat,V(.0054,.0645,0));
+ // Dual forward fork arms straddling flint barrel and engaging burner valve
+ const forkArmGeo=new T.BoxGeometry(.0068,.0015,.0011);
+ add(leverGroup,'Actuator fork arm front',forkArmGeo,polymerMat,V(-.0002,.0645,.0028));
+ add(leverGroup,'Actuator fork arm back',forkArmGeo,polymerMat,V(-.0002,.0645,-.0028));
+
+ // Printed graphic wrap
  const texture=canvasTexture(1024,1024,(c,w,h)=>{
   c.fillStyle='#111312';c.fillRect(0,0,w,h);
   for(const x of [w*.25,w*.75]){
@@ -177,12 +418,34 @@ function correctLighter(world){
   }
  });
  const sticker=add(model,'Right-hand-facing printed wrap',new T.CylinderGeometry(.00823,.00818,.054,96,1,true),new T.MeshStandardMaterial({map:texture,roughness:.47}),V(0,.031,0));sticker.rotation.y=Math.PI/2-bodyRoll;
- model.traverse(o=>{if(o.isMesh&&o!==sticker){o.castShadow=true;o.receiveShadow=true;if(o.material?.metalness>.7){o.material=o.material.clone();o.material.envMapIntensity=1.35;o.material.roughness=Math.max(.28,o.material.roughness);}}});
- world.nozzle=V(.003,.071,-.002).applyAxisAngle(V(0,1,0),bodyRoll);
+
+ model.traverse(o=>{
+  if(o.isMesh){
+   o.userData.item='lighter';
+   if(!world.interactive.includes(o))world.interactive.push(o);
+   if(o!==sticker){
+    o.castShadow=true;o.receiveShadow=true;
+    if(o.material?.metalness>.7){
+     o.material=o.material.clone();
+     o.material.envMapIntensity=1.35;
+     o.material.roughness=Math.max(.22,o.material.roughness);
+    }
+   }
+  }
+ });
+
+ // Connect flame system precisely to the new burner nozzle orifice
+ model.updateMatrixWorld(true);
+ topAssembly.updateMatrixWorld(true);
+ const nozzleWorldPos=nozzleTip.getWorldPosition(new T.Vector3());
+ world.nozzle=model.worldToLocal(nozzleWorldPos.clone());
  world.flameAnchor=world.nozzle.clone().add(V(0,.021,0));
- world.flame.position.copy(world.nozzle);world.flameCore.position.copy(world.nozzle);world.flameLight.position.copy(world.nozzle).add(V(0,.012,0));
+ world.flame.position.copy(world.nozzle);
+ world.flameCore.position.copy(world.nozzle);
+ world.flameLight.position.copy(world.nozzle).add(V(0,.012,0));
  world.flame.userData.pickable=world.flameCore.userData.pickable=false;
- mark(world,model,'lighter');world.heroProps.lighter=model;
+ mark(world,model,'lighter');
+ world.heroProps.lighter=model;
 }
 
 export function upgradeHeroProps(world){
@@ -191,7 +454,11 @@ export function upgradeHeroProps(world){
  world.heroAnchors={pipeTip:V(0,-.049,0),bowl:V(0,.045,0),bottleMouth:V(0,.226,0),outlet:V(.0326,.032,0),nozzle:world.nozzle.clone()};
  world.heroProps.update=sim=>{
   world.pipeGrommet.visible=sim.prep>0;
-  world.pipeResidue.material.opacity=Math.min(.72,sim.residue*.78);world.pipeResidue.visible=sim.residue>.005;
-  world.pipeMat.color.setRGB(1-sim.residue*.08,1-sim.residue*.12,1-sim.residue*.17);world.pipeMat.roughness=.05+sim.residue*.065;
+  world.pipeResidue.visible=sim.residue>0.003;
+  if(world.pipeResidue.visible&&world.pipeResidueCanvas){
+   updatePipeResidueTexture(world.pipeResidueCanvas,world.pipeResidueCtx,world.pipeResidueTexture,sim.residue);
+  }
+  world.pipeMat.color.setRGB(1-sim.residue*.04,1-sim.residue*.06,1-sim.residue*.09);
+  world.pipeMat.roughness=.05+sim.residue*.025;
  };
 }

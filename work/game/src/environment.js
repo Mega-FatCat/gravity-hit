@@ -53,13 +53,40 @@ function instances(world,geometry,material,placements,name,shadow=true){
  }
 }
 function scanMaterial(source,world,wind=0){const m=source.clone();m.color.setRGB(.92,.92,.92);m.roughness=.94;m.metalness=0;m.side=T.DoubleSide;m.transparent=false;m.depthWrite=true;m.envMapIntensity=.65;
+ const isBark=/trunk|bark|stump|branches/.test(source.name);
+ if(isBark){
+  m.roughness=.96;m.metalness=0;m.envMapIntensity=1.15;m.normalScale?.set(1.4,1.4);
+ }else{
+  m.normalScale?.set(.55,.55);
+ }
  const alphaKey=source.name.includes('pine_tree_01_twig')?'pine_tree_01':source.name.includes('fir_sapling_twigs')?'fir_sapling':source.name;
  // Fir needles are modeled opaque geometry, not cutout cards. Applying the
  // optional atlas mask to them removed most of the surviving LOD needles.
  if(alphaKey==='fir_sapling'){m.alphaMap=null;m.alphaTest=0;}
   else if(world.foliageAlphaTextures?.[alphaKey]){m.alphaMap=world.foliageAlphaTextures[alphaKey];m.alphaTest=.34;m.alphaToCoverage=true;}else if(m.alphaTest)m.alphaTest=.30;
- m.normalScale?.set(.55,.55);if(m.map)m.map.anisotropy=4;if(wind)world.addWind(m,wind);
- if(m.alphaMap||alphaKey==='fir_sapling'){
+ if(m.map)m.map.anisotropy=4;if(wind)world.addWind(m,wind);
+ if(isBark){
+  const compile=m.onBeforeCompile,cache=m.customProgramCacheKey();m.onBeforeCompile=shader=>{compile.call(m,shader);
+   shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`#include <map_fragment>
+    diffuseColor.rgb = pow(diffuseColor.rgb, vec3(0.86)) * vec3(1.22, 1.18, 1.12);
+   `).replace('#include <lights_fragment_end>',`#include <lights_fragment_end>
+    #if NUM_DIR_LIGHTS > 0
+     vec3 sunDir = -directionalLights[0].direction;
+     vec3 sunCol = directionalLights[0].color;
+     float NdotL = dot(normal, sunDir);
+     float barkWrap = smoothstep(-0.45, 0.45, NdotL);
+     float normalUp = normal.y * 0.5 + 0.5;
+     vec3 skyAmbient = vec3(0.20, 0.25, 0.22);
+     vec3 groundBounce = vec3(0.22, 0.18, 0.13);
+     vec3 forestAmbient = mix(groundBounce, skyAmbient, normalUp);
+     float edgeCatch = pow(1.0 - max(dot(normal, geometryViewDir), 0.0), 3.0);
+     float backScatter = pow(max(dot(geometryViewDir, sunDir), 0.0), 2.0);
+     vec3 rimLight = vec3(0.14, 0.18, 0.16) * (edgeCatch * (0.3 + 0.7 * backScatter));
+     reflectedLight.indirectDiffuse += diffuseColor.rgb * (forestAmbient * 0.48 + sunCol * (0.045 * barkWrap) + rimLight);
+    #endif
+   `);
+  };m.customProgramCacheKey=()=>`${cache}:rough-bark-1`;
+ }else if(m.alphaMap||alphaKey==='fir_sapling'){
   const compile=m.onBeforeCompile,cache=m.customProgramCacheKey();m.onBeforeCompile=shader=>{compile.call(m,shader);shader.fragmentShader=shader.fragmentShader.replace('#include <lights_fragment_end>',`#include <lights_fragment_end>
    #if NUM_DIR_LIGHTS > 0
     float leafForward = pow(max(dot(geometryViewDir, -directionalLights[0].direction), 0.0), 4.0);
@@ -187,22 +214,72 @@ export function plantGrass(world,model,lodModel){
  plantModel(world,model,{name:'Leafy grass tussocks',seed:15382,count:1100,radius:16,height:[.09,.23],cluster:1.3,wind:.021,shadow:false,variantPattern:/large/,nearPatches:true,lodModel,lodDistance:3.8});
  plantModel(world,model,{name:'Scattered grass seedheads',seed:86311,count:260,radius:32,height:[.20,.37],cluster:2.8,wind:.024,shadow:false,variantPattern:/tall/});
 }
-function pineSprays(source,height){
- // The old whole-tree decimation erased most individual needles. Retain its
- // branch distribution, rebuilding foliage from the original twig atlas.
- const p=source.geometry.attributes.position,r=random(91053),positions=[],uvs=[],indices=[];
- const along=new T.Vector3(),across=new T.Vector3(),other=new T.Vector3(),center=new T.Vector3(),v=new T.Vector3(),up=new T.Vector3(0,1,0);
- for(let i=0;i<1300;i++){
-  let j=0;for(let tries=0;tries<15;tries++){j=Math.floor(r()*p.count);if(p.getY(j)>height*.30&&Math.hypot(p.getX(j),p.getZ(j))>height*.027)break;}
-  center.fromBufferAttribute(p,j);along.set(center.x,.3*Math.hypot(center.x,center.z),center.z).normalize();across.crossVectors(along,up).normalize();other.crossVectors(along,across).normalize();
-  const length=height*(.026+r()*.020),width=length*.49;
-  for(const side of [across,other]){const base=positions.length/3;
-   for(const [x,y,u,t]of [[-.5,-.48,.028,.410],[.5,-.48,.200,.410],[-.5,.52,.028,.025],[.5,.52,.200,.025]]){v.copy(center).addScaledVector(side,x*width).addScaledVector(along,y*length);positions.push(v.x,v.y,v.z);uvs.push(u,t);}
-   indices.push(base,base+1,base+2,base+1,base+3,base+2);
+function appendPineCard(positions,uvs,indices,center,axis,side,length,width){
+ const base=positions.length/3;
+ for(const [along,lateral,u,v]of [[-.48,-.5,.028,.410],[-.48,.5,.200,.410],[.52,-.5,.028,.025],[.52,.5,.200,.025]]){
+  const p=center.clone().addScaledVector(axis,along*length).addScaledVector(side,lateral*width);positions.push(p.x,p.y,p.z);uvs.push(u,v);
+ }
+ indices.push(base,base+1,base+2,base+1,base+3,base+2);
+}
+function appendPineNeedle(positions,colors,indices,base,tip,width,depth,color){
+ const axis=tip.clone().sub(base).normalize(),up=new T.Vector3(0,1,0),side=new T.Vector3().crossVectors(axis,up);
+ if(side.lengthSq()<.001)side.crossVectors(axis,new T.Vector3(1,0,0));
+ side.normalize();const other=new T.Vector3().crossVectors(axis,side).normalize(),at=positions.length/3;
+ for(const [point,sx,sy]of [[base,1,1],[base,-1,-1],[base,1,-1],[base,-1,1],[tip,0,0]]){
+  const p=point.clone().addScaledVector(side,sx*width).addScaledVector(other,sy*depth);positions.push(p.x,p.y,p.z);colors.push(color[0],color[1],color[2]);
+ }
+ indices.push(at,at+1,at+4,at+1,at+2,at+4,at+2,at+3,at+4,at+3,at,at+4,at+3,at+2,at+1,at+3,at+1,at);
+}
+function appendPineBranch(positions,colors,indices,start,end,radius,color){
+ const axis=end.clone().sub(start).normalize(),up=new T.Vector3(0,1,0),side=new T.Vector3().crossVectors(axis,up);
+ if(side.lengthSq()<.001)side.crossVectors(axis,new T.Vector3(1,0,0));
+ side.normalize();const other=new T.Vector3().crossVectors(axis,side).normalize(),at=positions.length/3;
+ for(const [point,scale]of [[start,1],[end,.56]])for(let i=0;i<4;i++){
+  const a=i*Math.PI*.5,p=point.clone().addScaledVector(side,Math.cos(a)*radius*scale).addScaledVector(other,Math.sin(a)*radius*scale);positions.push(p.x,p.y,p.z);colors.push(color[0],color[1],color[2]);
+ }
+ for(let i=0;i<4;i++){const n=(i+1)%4,a=at+i,b=at+n,c=at+4+i,d=at+4+n;indices.push(a,b,c,b,d,c);}
+}
+function buildPineCanopy(source,height,{seed=91053,density=640,needlesPerCluster=5,branchCount=130,cardPlanes=2,distant=false}={}){
+ // The source's true branch distribution remains the placement guide. The
+ // decimated asset no longer dictates the visible canopy volume.
+ const p=source.geometry.attributes.position,r=random(seed),cards={positions:[],uvs:[],indices:[]},volume={positions:[],colors:[],indices:[]},branches={positions:[],colors:[],indices:[]};
+ const center=new T.Vector3(),radial=new T.Vector3(),axis=new T.Vector3(),side=new T.Vector3(),other=new T.Vector3(),plane=new T.Vector3(),up=new T.Vector3(0,1,0),base=new T.Vector3(),tip=new T.Vector3();
+ const green=[[.28,.43,.21],[.36,.54,.27],[.45,.63,.33],[.24,.39,.20]],wood=[[.40,.29,.17],[.52,.37,.22],[.32,.23,.14]];
+ const addCluster=(clusterCenter,clusterRadial,intensity=1,withBranch=false)=>{
+  axis.copy(clusterRadial).multiplyScalar(.88+r()*.18).addScaledVector(up,.14+(r()-.5)*.24).normalize();
+  side.crossVectors(axis,up);if(side.lengthSq()<.001)side.crossVectors(axis,new T.Vector3(1,0,0));side.normalize();
+  const cardLength=height*(distant?.021+r()*.013:(.022+r()*.018)*intensity),cardWidth=cardLength*(.30+r()*.15);
+  for(let q=0;q<cardPlanes;q++){plane.copy(side).applyAxisAngle(axis,r()*Math.PI+q*Math.PI*.5);appendPineCard(cards.positions,cards.uvs,cards.indices,clusterCenter,axis,plane,cardLength,cardWidth);}
+  const needleCount=Math.max(2,Math.round((needlesPerCluster+(r()<.34?1:0))*intensity));
+  for(let n=0;n<needleCount;n++){
+   const az=(n/needleCount)*Math.PI*2+(r()-.5)*.55,cone=.18+r()*.18;other.crossVectors(axis,side).normalize();const needleDir=axis.clone().multiplyScalar(.76+r()*.28).addScaledVector(side,Math.cos(az)*cone).addScaledVector(other,Math.sin(az)*cone).normalize();
+   base.copy(clusterCenter).addScaledVector(side,(r()-.5)*height*.008).addScaledVector(up,(r()-.5)*height*.006);tip.copy(base).addScaledVector(needleDir,height*(distant?.012+r()*.008:(.014+r()*.012)*intensity));
+   const length=tip.distanceTo(base),c=green[Math.floor(r()*green.length)],width=length*(distant?.070:.092),needleDepth=width*(.65+r()*.35);appendPineNeedle(volume.positions,volume.colors,volume.indices,base,tip,width,needleDepth,c);
+  }
+  if(withBranch){
+   const branchLength=height*(distant?.021+r()*.015:.032+r()*.030),branchStart=clusterCenter.clone().addScaledVector(clusterRadial,-branchLength),branchEnd=clusterCenter.clone().addScaledVector(up,(r()-.5)*height*.012);
+   branchStart.y+=height*(r()-.5)*.012;appendPineBranch(branches.positions,branches.colors,branches.indices,branchStart,branchEnd,height*(distant?.0010+r()*.0007:.0014+r()*.0012),wood[Math.floor(r()*wood.length)]);
+  }
+ };
+ for(let i=0;i<density;i++){
+  let j=0;for(let tries=0;tries<18;tries++){j=Math.floor(r()*p.count);if(p.getY(j)>height*(distant?.34:.27)&&Math.hypot(p.getX(j),p.getZ(j))>height*.022)break;}
+  center.fromBufferAttribute(p,j);radial.set(center.x,0,center.z);if(radial.lengthSq()<.001)radial.set(1,0,0);radial.normalize();
+  const depth=height*(distant?.004:.008),clusterCenter=center.clone().addScaledVector(radial,(r()-.5)*depth).addScaledVector(up,((i%3)-1)*depth*.58);addCluster(clusterCenter,radial,1,i<branchCount);
+ }
+ if(!distant){
+  // Fill the decimated source's largest gaps with irregular inner whorls. They
+  // are sparse enough to preserve sky holes, but add real depth between the
+  // scanned outer branches instead of another flat billboard layer.
+  const rings=8,samples=13;
+  for(let ring=0;ring<rings;ring++)for(let i=0;i<samples;i++){
+   const u=ring/(rings-1),a=(i/samples)*TAU+ring*.73+(r()-.5)*.28,radius=height*(.045+(.19*(1-u)))*(0.88+r()*.20);
+   center.set(Math.cos(a)*radius,height*(.29+u*.62)+(r()-.5)*height*.026,Math.sin(a)*radius);radial.set(Math.cos(a),0,Math.sin(a));addCluster(center,radial,.74,(ring+i)%4===0);
   }
  }
- const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));g.setIndex(indices);g.computeVertexNormals();return g;
+ const make=(data,colors=false)=>{const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(data.positions,3));if(data.uvs)g.setAttribute('uv',new T.Float32BufferAttribute(data.uvs,2));if(colors)g.setAttribute('color',new T.Float32BufferAttribute(data.colors,3));g.setIndex(data.indices);g.computeVertexNormals();return g;};
+ return{cards:make(cards),needles:make(volume,true),branches:make(branches,true)};
 }
+function pineVolumeMaterial(){return new T.MeshStandardMaterial({color:'#ffffff',roughness:.92,metalness:0,side:T.DoubleSide,vertexColors:true,envMapIntensity:.35});}
 export function plantPines(world,model,distant=false){
  const box=new T.Box3().setFromObject(model),height=box.getSize(new T.Vector3()).y,sources=sourceMeshes(model),r=random(distant?81500:71032);
  const canopyPlacements=[],trunkPlacements=[];
@@ -226,19 +303,33 @@ export function plantPines(world,model,distant=false){
    const s=h/height,width=s*crownWidthRatio,trunkBase=s*trunkRatio;
    const aspect=1+(r()-.5)*.16,trunkSx=trunkBase*aspect,trunkSz=trunkBase/aspect;
    const embed=.045+trunkBase*.018;
-   const baseProps={x,z,y:forestHeight(x,z)-embed,sy:s,rot:r()*TAU,rx:(r()-.5)*.03,rz:(r()-.5)*.035,tint};
+   const baseProps={x,z,y:forestHeight(x,z)-embed,sy:s,rot:r()*TAU,rx:(r()-.5)*.03,rz:(r()-.5)*.035,tint,distance:Math.hypot(x,z-2.65)};
    canopyPlacements.push({...baseProps,sx:width,sz:width});
-   trunkPlacements.push({...baseProps,sx:trunkSx,sz:trunkSz});
+   const trunkTint=distant?.90+r()*.14:.96+r()*.14;
+   trunkPlacements.push({...baseProps,sx:trunkSx,sz:trunkSz,tint:trunkTint});
   }
+  const nearCanopy=canopyPlacements.filter(p=>p.distance<15),midCanopy=canopyPlacements.filter(p=>p.distance>=15);
   for(const src of sources){
    const isTrunk=src.material.name.includes('trunk')||src.material.name.includes('dead_branches');
-   const isTwig=src.material.name.includes('twig');
-   const g=isTwig?pineSprays(src,height):src.geometry.clone();
-   g.translate(0,-box.min.y,0);
-   const m=scanMaterial(src.material,world,0);
-   m.color.setRGB(1,1,1);
-   if(isTwig){m.roughness=1;m.alphaTest=.30;}
-   instances(world,g,m,isTrunk?trunkPlacements:canopyPlacements,(distant?'Distant pine ':'Mature pine ')+src.material.name,!distant);
+   const isTwig=src.material.name.includes('twig'),label=distant?'Distant pine ':'Mature pine ';
+   if(isTwig){
+     const twigMat=scanMaterial(src.material,world,0);twigMat.color.setRGB(1.12,1.22,1.02);twigMat.roughness=.96;twigMat.alphaTest=.30;
+     const tiers=distant?[{placements:canopyPlacements,seed:91053,density:60,needles:2,branches:20,planes:2,distant:true,label:'distant'}]:[
+      {placements:nearCanopy,seed:91053,density:680,needles:5,branches:150,planes:2,label:'near'},
+      {placements:midCanopy,seed:91091,density:340,needles:4,branches:96,planes:2,label:'mid'}
+    ];
+    for(const tier of tiers){
+     if(!tier.placements.length)continue;
+     const canopy=buildPineCanopy(src,height,{seed:tier.seed,density:tier.density,needlesPerCluster:tier.needles,branchCount:tier.branches,cardPlanes:tier.planes,distant:tier.distant});
+     instances(world,canopy.cards,twigMat,tier.placements,`${label}${src.material.name} ${tier.label} needle detail`,!distant);
+      instances(world,canopy.needles,pineVolumeMaterial(),tier.placements,`${label}${tier.label} 3D needle volume`,!distant);
+     instances(world,canopy.branches,pineVolumeMaterial(),tier.placements,`${label}${tier.label} 3D branchlets`,!distant);
+    }
+    continue;
+   }
+   const g=src.geometry.clone();g.translate(0,-box.min.y,0);
+   const m=scanMaterial(src.material,world,0);m.color.setRGB(1,1,1);
+   instances(world,g,m,isTrunk?trunkPlacements:canopyPlacements,label+src.material.name,!distant);
   }
   world.environmentCounts??={};world.environmentCounts[distant?'Distant pines':'Mature pines']=canopyPlacements.length;
  }

@@ -315,11 +315,11 @@ export class World {
    this.bottleSmoke.visible=sim.smoke>.002;
    const smoke=this.bottleSmoke.material.uniforms;smoke.uTime.value=this.time;smoke.uDensity.value=sim.smokeDensity;smoke.uWater.value=.012+waterHeight;smoke.uCam.value.copy(bottle.worldToLocal(this.camera.position.clone()));
    this.outlet.visible=sim.outlet;this.bowlBud.visible=sim.bud>.01;this.budMat.emissive.setRGB(sim.embers*.7,sim.embers*.11,0);this.hotTip.material.opacity=sim.phase==='heat'?sim.heat*.45:0;
-   if(this.pipeMat){
-    const r=sim.residue;
-    this.pipeMat.color.setRGB(1-r*.62,1-r*.74,1-r*.88);
-    this.pipeMat.roughness=.05+r*.25;
-   }
+    if(this.pipeMat&&!this.heroProps){
+     const r=sim.residue;
+     this.pipeMat.color.setRGB(1-r*.04,1-r*.06,1-r*.09);
+     this.pipeMat.roughness=.05+r*.025;
+    }
 
    this.heroProps?.update(sim);
    const flameOn=(input.fire&&['heat','hole','ignite'].includes(sim.mode))||sim.mode==='auto';this.flame.visible=this.flameCore.visible=flameOn&&sim.angle<85&&sim.angle>-75;
