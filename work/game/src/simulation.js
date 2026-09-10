@@ -91,6 +91,7 @@ export class Simulation {
     return true;
    }
    this.mode=this.cap?'uncap':'screw';this.progress=this.cap?1:0;
+   if(!this.cap&&this.prep>0){this.supporting='pipe';if(!this.picked.includes('pipe'))this.picked.push('pipe');}
    this.say(this.cap?'Hold LMB or A to unscrew the cap.':'Hold LMB or D to screw the cap on.');
    if(this.upgraded)this.setCap(!this.cap);
    return true;
@@ -138,9 +139,11 @@ export class Simulation {
  }
  step(dt,input={}){
   dt=Number.isFinite(dt)?clamp(dt,0,.05):0;this.flow=0;this.time+=dt;this.noticeTimer=Math.max(0,this.noticeTimer-dt);this.busy=Math.max(0,this.busy-dt);
-  const tilt=(input.right?1:0)-(input.left?1:0);if(['heat','hole','ignite'].includes(this.mode))this.angle=clamp(this.angle+tilt*dt*70,-100,100);
+  const tilt=(input.right?1:0)-(input.left?1:0);
+  const lighterAlone=this.held==='lighter'&&!this.supporting;
+  if(['heat','hole','ignite'].includes(this.mode)||lighterAlone)this.angle=clamp(this.angle+tilt*dt*70,-100,100);
   const aim=Number.isFinite(input.aim)?clamp(input.aim):0;
-  this.flameQuality=input.fire&&this.held==='lighter'&&['heat','hole','ignite'].includes(this.mode)?clamp(1-Math.abs(this.angle-45)/110)*aim:0;
+  this.flameQuality=input.fire&&this.held==='lighter'&&(lighterAlone||['heat','hole','ignite'].includes(this.mode))?clamp(1-Math.abs(this.angle-45)/110)*(lighterAlone?1:aim):0;
   if(this.angle>85||this.angle<-75)this.flameQuality=0;
   if(this.phase==='heat'&&this.mode==='heat'&&this.supporting==='pipe'){
    this.heat=clamp(this.heat+(this.flameQuality*.34-.035)*dt);
@@ -148,10 +151,13 @@ export class Simulation {
   }else if(this.phase==='press'&&this.mode==='press'&&this.held==='bottle'&&this.supporting==='pipe'){
    this.progress=clamp(this.progress+(input.fire?aim*dt*.45:-dt*.03));
    if(this.progress>=1){this.prep=1;this.supporting=null;this.phase='unscrew';this.mode='unscrew';this.held='bottle';this.progress=1;this.say('The cap now holds the pipe. Hold A to unscrew it.');}
-  }else if(this.phase==='unscrew'&&this.mode==='unscrew'&&this.held==='bottle'){
-   const turn=tilt!==0?tilt:(input.fire?-1:0);
-   this.progress=clamp(this.progress+turn*dt*.5);
-   if(this.progress<=0){this.setCap(false);this.phase='hole';this.progress=0;this.say('Keep the bottle in hand. Select the lighter to form the lower opening.');}
+  }else if(this.phase==='unscrew'&&this.held==='bottle'){
+   if(this.mode==='idle'&&(tilt<0||input.fire))this.mode='unscrew';
+   if(this.mode==='unscrew'){
+    const turn=tilt!==0?tilt:(input.fire?-1:0);
+    this.progress=clamp(this.progress+turn*dt*.5);
+    if(this.progress<=0){this.setCap(false);this.phase='hole';this.progress=0;this.say('Keep the bottle in hand. Select the lighter to form the lower opening.');}
+   }
   }else if(this.phase==='hole'&&this.mode==='hole'&&this.supporting==='bottle'){
    this.progress=clamp(this.progress+this.flameQuality*dt*.32);
    if(this.progress>=1){this.prep=2;this.outlet=true;this.phase='free';this.mode='idle';this.heat=0;this.say('Preparation complete. Load the pipe, then fill the bottle.');}
@@ -162,7 +168,7 @@ export class Simulation {
    }
    if(this.held==='bottle'&&this.mode==='idle'&&!this.upgraded){
     if(tilt<0&&this.cap){this.mode='uncap';this.progress=1;}
-    else if(tilt>0&&!this.cap){this.mode='screw';this.progress=0;}
+    else if(tilt>0&&!this.cap){this.mode='screw';this.progress=0;if(this.prep>0){this.supporting='pipe';if(!this.picked.includes('pipe'))this.picked.push('pipe');}}
    }
    if((this.mode==='screw'||this.mode==='uncap')&&this.held==='bottle'){
     const turn=tilt!==0?tilt:(input.fire?(this.mode==='screw'?1:-1):0);

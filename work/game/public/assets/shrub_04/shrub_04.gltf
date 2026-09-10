@@ -1,167 +1,325 @@
 {
-  "asset": {
-    "generator": "Khronos glTF Blender I/O v3.5.30",
-    "version": "2.0"
-  },
-  "scene": 0,
-  "scenes": [
-    {
-      "name": "Scene",
-      "nodes": [
-        0
-      ]
-    }
-  ],
-  "nodes": [
-    {
-      "mesh": 0,
-      "name": "shrub_04",
-      "translation": [
-        0.5103073120117188,
-        0,
-        0
-      ]
-    }
-  ],
-  "materials": [
-    {
-      "alphaCutoff": 0.5,
-      "alphaMode": "MASK",
-      "doubleSided": true,
-      "name": "shrub_04",
-      "normalTexture": {
-        "index": 0
-      },
-      "pbrMetallicRoughness": {
-        "baseColorTexture": {
-          "index": 1
-        },
-        "metallicFactor": 0,
-        "metallicRoughnessTexture": {
-          "index": 2
-        }
-      }
-    }
-  ],
-  "meshes": [
-    {
-      "name": "Plane.063",
-      "primitives": [
-        {
-          "attributes": {
-            "POSITION": 0,
-            "TEXCOORD_0": 1,
-            "NORMAL": 2
-          },
-          "indices": 3,
-          "material": 0
-        }
-      ]
-    }
-  ],
-  "textures": [
-    {
-      "sampler": 0,
-      "source": 0
-    },
-    {
-      "sampler": 0,
-      "source": 1
-    },
-    {
-      "sampler": 0,
-      "source": 2
-    }
-  ],
-  "images": [
-    {
-      "mimeType": "image/jpeg",
-      "name": "shrub_04_nor_gl",
-      "uri": "textures/shrub_04_nor_gl_1k.jpg"
-    },
-    {
-      "mimeType": "image/jpeg",
-      "name": "shrub_04_diff",
-      "uri": "textures/shrub_04_diff_1k.jpg"
-    },
-    {
-      "mimeType": "image/jpeg",
-      "name": "shrub_04_rough",
-      "uri": "textures/shrub_04_arm_1k.jpg"
-    }
-  ],
-  "accessors": [
-    {
-      "bufferView": 0,
-      "componentType": 5126,
-      "count": 18285,
-      "max": [
-        0.048936210572719574,
-        0.2132624387741089,
-        0.07108771800994873
-      ],
-      "min": [
-        -0.5347539782524109,
-        -0.005937241483479738,
-        -0.07500956952571869
-      ],
-      "type": "VEC3"
-    },
-    {
-      "bufferView": 1,
-      "componentType": 5126,
-      "count": 18285,
-      "type": "VEC2"
-    },
-    {
-      "bufferView": 2,
-      "componentType": 5126,
-      "count": 18285,
-      "type": "VEC3"
-    },
-    {
-      "bufferView": 3,
-      "componentType": 5123,
-      "count": 81981,
-      "type": "SCALAR"
-    }
-  ],
-  "bufferViews": [
-    {
-      "buffer": 0,
-      "byteLength": 219420,
-      "byteOffset": 0,
-      "target": 34962
-    },
-    {
-      "buffer": 0,
-      "byteLength": 146280,
-      "byteOffset": 219420,
-      "target": 34962
-    },
-    {
-      "buffer": 0,
-      "byteLength": 219420,
-      "byteOffset": 365700,
-      "target": 34962
-    },
-    {
-      "buffer": 0,
-      "byteLength": 163962,
-      "byteOffset": 585120,
-      "target": 34963
-    }
-  ],
-  "samplers": [
-    {
-      "magFilter": 9729,
-      "minFilter": 9987
-    }
-  ],
-  "buffers": [
-    {
-      "byteLength": 749084,
-      "uri": "shrub_04.bin"
-    }
-  ]
+	"asset":{
+		"generator":"Khronos glTF Blender I/O v5.2.40",
+		"version":"2.0"
+	},
+	"scene":0,
+	"scenes":[
+		{
+			"name":"Scene",
+			"nodes":[
+				0,
+				1,
+				2
+			]
+		}
+	],
+	"nodes":[
+		{
+			"mesh":0,
+			"name":"shrub_04_a"
+		},
+		{
+			"mesh":1,
+			"name":"shrub_04_b",
+			"translation":[
+				1.5,
+				0,
+				0
+			]
+		},
+		{
+			"mesh":2,
+			"name":"shrub_04_c",
+			"translation":[
+				3,
+				0,
+				0
+			]
+		}
+	],
+	"materials":[
+		{
+			"alphaMode":"MASK",
+			"doubleSided":true,
+			"name":"shrub_04",
+			"normalTexture":{
+				"index":0
+			},
+			"pbrMetallicRoughness":{
+				"baseColorTexture":{
+					"index":1
+				},
+				"metallicFactor":0,
+				"metallicRoughnessTexture":{
+					"index":2
+				}
+			}
+		}
+	],
+	"meshes":[
+		{
+			"name":"Plane.002",
+			"primitives":[
+				{
+					"attributes":{
+						"POSITION":0,
+						"NORMAL":1,
+						"TEXCOORD_0":2
+					},
+					"indices":3,
+					"material":0
+				}
+			]
+		},
+		{
+			"name":"Plane.006",
+			"primitives":[
+				{
+					"attributes":{
+						"POSITION":4,
+						"NORMAL":5,
+						"TEXCOORD_0":6
+					},
+					"indices":7,
+					"material":0
+				}
+			]
+		},
+		{
+			"name":"Plane.010",
+			"primitives":[
+				{
+					"attributes":{
+						"POSITION":8,
+						"NORMAL":9,
+						"TEXCOORD_0":10
+					},
+					"indices":11,
+					"material":0
+				}
+			]
+		}
+	],
+	"textures":[
+		{
+			"sampler":0,
+			"source":0
+		},
+		{
+			"sampler":0,
+			"source":1
+		},
+		{
+			"sampler":0,
+			"source":2
+		}
+	],
+	"images":[
+		{
+			"mimeType":"image/jpeg",
+			"name":"shrub_04_nor_gl_1k",
+			"uri":"shrub_04_nor_gl_1k.jpg"
+		},
+		{
+			"mimeType":"image/png",
+			"name":"shrub_04_diff_1k",
+			"uri":"shrub_04_diff_1k.png"
+		},
+		{
+			"mimeType":"image/jpeg",
+			"name":"shrub_04_arm_1k",
+			"uri":"shrub_04_arm_1k.jpg"
+		}
+	],
+	"accessors":[
+		{
+			"bufferView":0,
+			"componentType":5126,
+			"count":39784,
+			"max":[
+				0.05228840187191963,
+				0.22634680569171906,
+				0.07087117433547974
+			],
+			"min":[
+				-0.5344437956809998,
+				-0.0062418668530881405,
+				-0.09588290005922318
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":1,
+			"componentType":5126,
+			"count":39784,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":2,
+			"componentType":5126,
+			"count":39784,
+			"type":"VEC2"
+		},
+		{
+			"bufferView":3,
+			"componentType":5123,
+			"count":110673,
+			"type":"SCALAR"
+		},
+		{
+			"bufferView":4,
+			"componentType":5126,
+			"count":39803,
+			"max":[
+				0.05634838715195656,
+				0.21370728313922882,
+				0.09099380671977997
+			],
+			"min":[
+				-0.5344437956809998,
+				-0.005622736643999815,
+				-0.09817451238632202
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":5,
+			"componentType":5126,
+			"count":39803,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":6,
+			"componentType":5126,
+			"count":39803,
+			"type":"VEC2"
+		},
+		{
+			"bufferView":7,
+			"componentType":5123,
+			"count":110673,
+			"type":"SCALAR"
+		},
+		{
+			"bufferView":8,
+			"componentType":5126,
+			"count":39832,
+			"max":[
+				0.06538831442594528,
+				0.23718653619289398,
+				0.10133522748947144
+			],
+			"min":[
+				-0.5926774740219116,
+				-0.012812928296625614,
+				-0.09619193524122238
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":9,
+			"componentType":5126,
+			"count":39832,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":10,
+			"componentType":5126,
+			"count":39832,
+			"type":"VEC2"
+		},
+		{
+			"bufferView":11,
+			"componentType":5123,
+			"count":110670,
+			"type":"SCALAR"
+		}
+	],
+	"bufferViews":[
+		{
+			"buffer":0,
+			"byteLength":477408,
+			"byteOffset":0,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":477408,
+			"byteOffset":477408,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":318272,
+			"byteOffset":954816,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":221346,
+			"byteOffset":1273088,
+			"target":34963
+		},
+		{
+			"buffer":0,
+			"byteLength":477636,
+			"byteOffset":1494436,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":477636,
+			"byteOffset":1972072,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":318424,
+			"byteOffset":2449708,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":221346,
+			"byteOffset":2768132,
+			"target":34963
+		},
+		{
+			"buffer":0,
+			"byteLength":477984,
+			"byteOffset":2989480,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":477984,
+			"byteOffset":3467464,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":318656,
+			"byteOffset":3945448,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":221340,
+			"byteOffset":4264104,
+			"target":34963
+		}
+	],
+	"samplers":[
+		{
+			"magFilter":9729,
+			"minFilter":9987
+		}
+	],
+	"buffers":[
+		{
+			"byteLength":4485444,
+			"uri":"shrub_04.bin"
+		}
+	]
 }

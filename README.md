@@ -8,9 +8,9 @@ The game supports preparation, ten consumable charges, missed drops, water seali
 
 ## Development
 
-From `work/game`, use `npm run dev` for local development, `npm run build` for the bundled application, `npm test` for the simulation checks, and `npm run package` for the portable Windows folder. The existing dependencies and assets are included in this workspace. `package-lock.json` pins the dependency versions. Blender source and its generation script are in `work/clipper.blend` and `work/build_hero.py`.
+From `work/game`, use `npm run dev` for local development, `npm run build` for the bundled application, `npm test` (or `node --test tests/*.test.mjs`) for the simulation checks, and `npm run package` for the portable Windows folder. The existing dependencies and assets are included in this workspace. `package-lock.json` pins the dependency versions. Blender source and its generation script are in `work/clipper.blend` and `work/build_hero.py`.
 
-`work/qa` contains independent critiques, screenshots, executable tests, and performance results. These records distinguish measured behavior from visual-quality targets.
+`work/qa` contains independent critiques, screenshots, executable tests, and performance results. Project documentation adheres to the standardized status semantics defined in `PROJECT_HANDOFF.md` and `AGENTS.md` (`USER VERIFIED CURRENT`, `AUTOMATED VERIFIED`, `CURRENT BUILD NEEDS MANUAL CHECK`, `PREVIOUS AGENT CLAIM`, `FIXED BUT REGRESSION-PRONE`, `SUPERSEDED`), strictly prioritizing user feedback over automated passes or historical agent claims.
 
 ## Rendering
 

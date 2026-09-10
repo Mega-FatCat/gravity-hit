@@ -89,8 +89,7 @@ Use this text at the top of each future implementation prompt:
 > Preserve systems explicitly marked as good.  
 > Make the smallest coherent change that reaches the requested player-visible result.  
 > For visual tasks, capture the exact required before/after views. For gameplay tasks, perform the exact state/interaction verification listed.  
-> A green automated test is supporting evidence, not acceptance.  
-> Update the task status in the walkthrough as **VERIFIED FIXED / PARTIAL / STILL BROKEN / ALREADY FIXED BEFORE THIS TASK**, with evidence.  
+> Update the task status in the backlog/handoff using canonical categories: **USER VERIFIED CURRENT**, **AUTOMATED VERIFIED**, **CURRENT BUILD NEEDS MANUAL CHECK**, **PREVIOUS AGENT CLAIM**, **FIXED BUT REGRESSION-PRONE**, or **SUPERSEDED**, with evidence.  
 > Then STOP.
 
 ---
@@ -892,16 +891,24 @@ Every QA capture set records build/source identifier, timestamp, renderer info, 
 
 ## GH-45 — Keep walkthrough/handoff current-state and historical claims separated
 **Priority:** P2  
-**Size:** SMALL
+**Size:** SMALL  
+**Status:** AUTOMATED VERIFIED & DOCUMENTATION STANDARDIZED (CURRENT BUILD NEEDS MANUAL CHECK)
 
 ### Desired result
 Clear status vocabulary:
-- USER VERIFIED CURRENT,
-- AUTOMATED VERIFIED,
-- CURRENT BUILD NEEDS MANUAL CHECK,
-- PREVIOUS AGENT CLAIM,
-- FIXED BUT REGRESSION-PRONE,
-- SUPERSEDED.
+- **USER VERIFIED CURRENT**: Directly confirmed by human user in interactive playtest or visual critique. Highest authority level; cannot be overridden by automated passes or agent claims alone.
+- **AUTOMATED VERIFIED**: Proven by test suites (`node --test tests/*.test.mjs`, `stability.mjs`, `playtest.mjs`, `benchmark.mjs`). Validates code logic/invariants, but does NOT substitute for player-visible acceptance.
+- **CURRENT BUILD NEEDS MANUAL CHECK**: Implemented in code/assets, passed automated gates, but pending human visual/interactive acceptance.
+- **PREVIOUS AGENT CLAIM**: Assertions made in earlier agent reports, commit summaries, or checkpoints (e.g. "Release complete", "[RESOLVED] Bottle Hole Framing", "8/10 graphics"). Must be treated with skepticism until independently reproduced or user-confirmed; never confused with current truth.
+- **FIXED BUT REGRESSION-PRONE**: Historically fragile features (lighter alignment, held-object transforms, label tracking, drainage threshold). Requires mandatory regression verification whenever related code changes.
+- **SUPERSEDED**: Outdated metrics (e.g. historical 19/19 or 30/30 unit tests), obsolete passes, or contradicted earlier claims. Preserved for context and post-mortem analysis, marked as inactive.
+
+### Implementation
+- Added foundational Section 0 to `PROJECT_HANDOFF.md` establishing the 6 canonical categories and the 8-tier source-of-truth priority.
+- Audited `PROJECT_HANDOFF.md`: categorized all verification matrices, bug lists, and historical sessions with explicit status tags.
+- Re-framed historical "release complete" claims and Pass 2/Pass 3 "[RESOLVED]" sections as `[PREVIOUS AGENT CLAIM - SUPERSEDED]`.
+- Updated `AGENTS.md` with strict rules requiring future agents to use this status vocabulary and respect the source-of-truth hierarchy.
+- Recorded recent implementation phases (49/49 tests passing) while categorizing them as `[AUTOMATED VERIFIED: CURRENT BUILD NEEDS MANUAL CHECK]`.
 
 ---
 

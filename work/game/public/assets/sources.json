@@ -23,6 +23,13 @@
     "resolution": "1k"
   },
   {
+    "id": "pine_bark_4k",
+    "source": "https://polyhaven.com/a/pine_bark",
+    "license": "CC0",
+    "resolution": "4k",
+    "usage": "High-resolution bark diffuse, normal GL, and roughness maps for pine trunk and bark materials"
+  },
+  {
     "id": "bark_brown_02",
     "source": "https://polyhaven.com/a/bark_brown_02",
     "license": "CC0",

@@ -1,0 +1,431 @@
+{
+  "asset": {
+    "generator": "Khronos glTF Blender I/O v5.2.40",
+    "version": "2.0"
+  },
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "Scene",
+      "nodes": [
+        0,
+        1,
+        2,
+        3
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 0,
+      "name": "shrub_02_a",
+      "rotation": [
+        0.12589912116527557,
+        -0.6947681307792664,
+        0.0060972836799919605,
+        0.7081027626991272
+      ]
+    },
+    {
+      "mesh": 1,
+      "name": "shrub_02_b",
+      "rotation": [
+        0.08358939737081528,
+        -0.7466307878494263,
+        0.26227882504463196,
+        0.6056113839149475
+      ],
+      "translation": [
+        2.5,
+        0,
+        0
+      ]
+    },
+    {
+      "mesh": 2,
+      "name": "shrub_02_c",
+      "rotation": [
+        0.12648987770080566,
+        -0.7129753232002258,
+        0.39439618587493896,
+        0.5657898783683777
+      ],
+      "translation": [
+        5,
+        0,
+        0
+      ]
+    },
+    {
+      "mesh": 3,
+      "name": "shrub_02_d",
+      "rotation": [
+        0.047377295792102814,
+        -0.7383221983909607,
+        -0.30041447281837463,
+        0.60198575258255
+      ],
+      "translation": [
+        7.5,
+        0,
+        0
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "alphaMode": "MASK",
+      "doubleSided": true,
+      "name": "shrub_02",
+      "normalTexture": {
+        "index": 0
+      },
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 1
+        },
+        "metallicFactor": 0,
+        "metallicRoughnessTexture": {
+          "index": 2
+        }
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "Plane.001",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TEXCOORD_0": 2
+          },
+          "indices": 3,
+          "material": 0
+        }
+      ]
+    },
+    {
+      "name": "Plane.006",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 4,
+            "NORMAL": 5,
+            "TEXCOORD_0": 6
+          },
+          "indices": 7,
+          "material": 0
+        }
+      ]
+    },
+    {
+      "name": "Plane.011",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 8,
+            "NORMAL": 9,
+            "TEXCOORD_0": 10
+          },
+          "indices": 11,
+          "material": 0
+        }
+      ]
+    },
+    {
+      "name": "Plane.016",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 12,
+            "NORMAL": 13,
+            "TEXCOORD_0": 14
+          },
+          "indices": 15,
+          "material": 0
+        }
+      ]
+    }
+  ],
+  "textures": [
+    {
+      "sampler": 0,
+      "source": 0
+    },
+    {
+      "sampler": 0,
+      "source": 1
+    },
+    {
+      "sampler": 0,
+      "source": 2
+    }
+  ],
+  "images": [
+    {
+      "mimeType": "image/jpeg",
+      "name": "shrub_02_nor_gl_2k",
+      "uri": "shrub_02_nor_gl_2k.jpg"
+    },
+    {
+      "mimeType": "image/png",
+      "name": "shrub_02_diff_2k",
+      "uri": "shrub_02_diff_2k.png"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "shrub_02_arm_2k",
+      "uri": "shrub_02_arm_2k.jpg"
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 20978,
+      "max": [
+        0.6156559586524963,
+        1.6821810007095337,
+        0.42984509468078613
+      ],
+      "min": [
+        -0.9439988136291504,
+        -0.033884622156620026,
+        -0.863244354724884
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 20978,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 20978,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5123,
+      "count": 92556,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 4,
+      "componentType": 5126,
+      "count": 25017,
+      "max": [
+        1.0080711841583252,
+        1.257921576499939,
+        0.33434444665908813
+      ],
+      "min": [
+        -0.8223820924758911,
+        -0.11572111397981644,
+        -1.0773800611495972
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 5,
+      "componentType": 5126,
+      "count": 25017,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 6,
+      "componentType": 5126,
+      "count": 25017,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 7,
+      "componentType": 5123,
+      "count": 109626,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 8,
+      "componentType": 5126,
+      "count": 27691,
+      "max": [
+        1.287977695465088,
+        1.0710355043411255,
+        0.24143657088279724
+      ],
+      "min": [
+        -0.8910231590270996,
+        -0.2947101294994354,
+        -1.22649085521698
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 9,
+      "componentType": 5126,
+      "count": 27691,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 10,
+      "componentType": 5126,
+      "count": 27691,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 11,
+      "componentType": 5123,
+      "count": 121440,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 12,
+      "componentType": 5126,
+      "count": 20602,
+      "max": [
+        0.600039541721344,
+        1.2130378484725952,
+        0.6559020280838013
+      ],
+      "min": [
+        -1.051486849784851,
+        -0.3439231514930725,
+        -0.47873756289482117
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 13,
+      "componentType": 5126,
+      "count": 20602,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 14,
+      "componentType": 5126,
+      "count": 20602,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 15,
+      "componentType": 5123,
+      "count": 90282,
+      "type": "SCALAR"
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 251736,
+      "byteOffset": 0,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 251736,
+      "byteOffset": 251736,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 167824,
+      "byteOffset": 503472,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 185112,
+      "byteOffset": 671296,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 300204,
+      "byteOffset": 856408,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 300204,
+      "byteOffset": 1156612,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 200136,
+      "byteOffset": 1456816,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 219252,
+      "byteOffset": 1656952,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 332292,
+      "byteOffset": 1876204,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 332292,
+      "byteOffset": 2208496,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 221528,
+      "byteOffset": 2540788,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 242880,
+      "byteOffset": 2762316,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 247224,
+      "byteOffset": 3005196,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 247224,
+      "byteOffset": 3252420,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 164816,
+      "byteOffset": 3499644,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 180564,
+      "byteOffset": 3664460,
+      "target": 34963
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9729,
+      "minFilter": 9987
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 3845024,
+      "uri": "shrub_02_base.bin"
+    }
+  ]
+}

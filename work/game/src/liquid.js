@@ -1,9 +1,9 @@
 import * as T from 'three';
-const radius=y=>y<.145?.0312:T.MathUtils.lerp(.0312,.012,T.MathUtils.smoothstep(y,.145,.215));
+const radius=y=>y<.145?.0294:T.MathUtils.lerp(.0294,.012,T.MathUtils.smoothstep(y,.145,.215));
 export class Liquid {
  constructor(bottle,scene){
   this.bottle=bottle;this.plane=new T.Plane(new T.Vector3(0,-1,0),0);this.inverse=new T.Matrix4();this.localWaterPlane=new T.Vector4(0,1,0,-.006);
-  const profile=[[0,.006],[.022,.006],[.0312,.020],[.0312,.145],[.026,.175],[.019,.195],[.012,.215],[0,.215]].map(v=>new T.Vector2(...v));
+  const profile=[[0,.006],[.022,.006],[.0294,.020],[.0294,.145],[.026,.175],[.019,.195],[.012,.215],[0,.215]].map(v=>new T.Vector2(...v));
   const material=new T.MeshPhysicalMaterial({color:'#bfd3c4',roughness:.075,transmission:.35,thickness:.026,ior:1.333,transparent:true,opacity:.26,depthWrite:false,side:T.FrontSide,clippingPlanes:[this.plane],envMapIntensity:.32});
   this.volume=new T.Mesh(new T.LatheGeometry(profile,64),material);this.volume.renderOrder=1;bottle.add(this.volume);
   const surfaceMat=new T.MeshPhysicalMaterial({color:'#1a2e22',roughness:.28,metalness:.0,transparent:true,opacity:.14,depthWrite:false,side:T.DoubleSide,envMapIntensity:.06});
@@ -14,7 +14,7 @@ export class Liquid {
    shader.fragmentShader='uniform mat4 uBottleInverse;varying vec3 vLiquidWorld;\n'+shader.fragmentShader;
    shader.fragmentShader=shader.fragmentShader.replace('#include <clipping_planes_fragment>',`#include <clipping_planes_fragment>
 vec3 localLiquid=(uBottleInverse*vec4(vLiquidWorld,1.)).xyz;
-float r=mix(.0312,.012,smoothstep(.145,.215,localLiquid.y));
+float r=mix(.0294,.012,smoothstep(.145,.215,localLiquid.y));
 if(localLiquid.y<.006||localLiquid.y>.215||length(localLiquid.xz)>r)discard;
 float distNorm=length(localLiquid.xz)/max(.001,r);
 float meniscus=smoothstep(.80,.98,distNorm);

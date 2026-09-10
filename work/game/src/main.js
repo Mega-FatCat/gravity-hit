@@ -2,6 +2,9 @@ import './style.css';
 import {Simulation,clamp} from './simulation.js';
 import {World} from './world.js';
 import {Soundscape} from './audio.js';
+import * as THREE from 'three';
+import * as budModule from './bud.js';
+import {renderBudSpriteDataUrl} from './bud.js';
 
 const $=id=>document.getElementById(id);
 const icons={bottle:'<path d="M9 2h6v4l3 5v16H6V11l3-5zM6 15h12M6 20h12"/>',pipe:'<path d="M9 2h6v5l-2 4v16h-2V11L9 7z"/>',lighter:'<rect x="7" y="8" width="12" height="20" rx="4"/><path d="M8 8V3h9v5M12 3V1M7 13h12"/>',bag:'<path d="M4 7h20v19H4zM4 10h20M10 17l3-3 3 3-2 6z"/>',stream:'<path d="M3 10q5-5 10 0t11 0M3 16q5-5 10 0t11 0M3 22q5-5 10 0t11 0"/>'};
@@ -27,7 +30,12 @@ $('app').innerHTML=`<canvas id="scene"></canvas><div class="vignette"></div>
 
 let world;
 try{world=new World($('scene'),v=>{$('load-progress').style.width=`${v*100}%`;});}catch(e){$('app').innerHTML+=`<div class="error">The graphics renderer could not start.<br>${String(e.message)}<br>Please try restarting the game.</div>`;throw e;}
-await world.ready;world.setQuality(settings.quality);$('begin').disabled=false;$('begin').textContent=saved?'Return to the clearing →':'Enter the clearing →';$('loading').classList.add('hidden');
+await world.ready;world.setQuality(settings.quality);
+try{
+ const budSprite=renderBudSpriteDataUrl(world.renderer);
+ if($('nug'))$('nug').style.backgroundImage=`url("${budSprite}")`;
+}catch(e){console.warn('Bud sprite render',e);}
+$('begin').disabled=false;$('begin').textContent=saved?'Return to the clearing →':'Enter the clearing →';$('loading').classList.add('hidden');
 
 function begin(){started=true;$('welcome').classList.add('hidden');$('hud').classList.remove('hidden');sound.start();}
 $('begin').onclick=begin;
@@ -77,12 +85,18 @@ $('scene').addEventListener('pointerdown',e=>{
  input.x=e.clientX;input.y=e.clientY;
  if(e.button===2){dragLook=true;$('scene').setPointerCapture(e.pointerId);return;}
  if(e.button===0){
-  if(['idle','pack'].includes(sim.mode)){pendingPick={x:e.clientX,y:e.clientY};input.fire=false;}
-  else input.fire=true;
+  const lighterAlone=sim.held==='lighter'&&!sim.supporting;
+  if(lighterAlone){
+   pendingPick={x:e.clientX,y:e.clientY};
+   input.fire=true;
+  }else if(['idle','pack'].includes(sim.mode)){
+   pendingPick={x:e.clientX,y:e.clientY};
+   input.fire=false;
+  }else input.fire=true;
   sound.effect('click');
  }
 });
-window.addEventListener('pointermove',e=>{input.x=e.clientX;input.y=e.clientY;if(dragLook&&!paused&&!photo)world.look(e.movementX,e.movementY);if(dragNug){$('nug').style.left=`${e.clientX-17}px`;$('nug').style.top=`${e.clientY-14}px`;}});
+window.addEventListener('pointermove',e=>{input.x=e.clientX;input.y=e.clientY;if(dragLook&&!paused&&!photo)world.look(e.movementX,e.movementY);if(dragNug){$('nug').style.left=`${e.clientX-19}px`;$('nug').style.top=`${e.clientY-19}px`;}});
 window.addEventListener('pointerup',e=>{if(e.button===2){dragLook=false;if($('scene').hasPointerCapture(e.pointerId))$('scene').releasePointerCapture(e.pointerId);}if(e.button===0)input.fire=false;if(dragNug){world.prepareFrame(0,sim,input,settings);const p=world.aimScreen;const success=Math.hypot(e.clientX-p.x,e.clientY-p.y)<27;sim.pack(success);sound.effect(success?'glass':'click');dragNug=false;resetNug();save();}});
 function resetNug(){$('nug').style.left='32%';$('nug').style.top='53%';}
 $('nug').addEventListener('pointerdown',e=>{if(paused)return;e.preventDefault();e.stopPropagation();dragNug=true;$('nug').setPointerCapture(e.pointerId);});
@@ -138,7 +152,14 @@ function frame(now){requestAnimationFrame(frame);const elapsed=last===null?0:Mat
  if(photo){world.pathTracer?.renderSample();$('photo-label').textContent=`Ray-traced photograph · ${Math.floor(world.pathTracer?.samples||0)} samples · Esc to return`;return;}
  if(photoLoading)return;
  world.prepareFrame(paused?0:dt,sim,input,settings);
- if(pendingPick){const pick=pendingPick;pendingPick=null;const id=world.hitTest(pick.x,pick.y,sim);if(id)act(id);world.prepareFrame(0,sim,input,settings);}
+ if(pendingPick){
+  const pick=pendingPick;pendingPick=null;const id=world.hitTest(pick.x,pick.y,sim);
+  if(id){
+   const lighterAlone=sim.held==='lighter'&&!sim.supporting;
+   if(!(lighterAlone&&id==='lighter'))act(id);
+  }
+  world.prepareFrame(0,sim,input,settings);
+ }
  if(started&&!paused){input.aim=world.interactionAim(sim,input);sim.step(dt,input);}
  if(lastPhase!==sim.phase){save();if(sim.phase==='inhale'){sound.effect('water');coughPlayed=false;}lastPhase=sim.phase;}
  if(sim.phase==='inhale'&&sim.transition>1.8&&!coughPlayed){sound.effect('cough');coughPlayed=true;}
@@ -167,4 +188,4 @@ function frame(now){requestAnimationFrame(frame);const elapsed=last===null?0:Mat
 }
 requestAnimationFrame(frame);
 // A bounded inspection interface for the development and visual-review harness.
-if(new URLSearchParams(location.search).has('qa'))window.__game={get sim(){return sim},world,settings,input,begin,act,save,openMenu,closeMenu,enterPhoto,leavePhoto,setView(yaw,pitch){world.yaw=yaw;world.pitch=pitch;},setState(state){Object.assign(sim,state);},metrics(){const sorted=[...frameTimes].sort((a,b)=>a-b);return{fps:1000/(frameTimes.reduce((a,b)=>a+b,0)/frameTimes.length),p95ms:sorted[Math.floor(sorted.length*.95)],triangles:world.renderer.info.render.triangles,calls:world.renderer.info.render.calls,assets:world.assetErrors,renderer:world.renderer.getContext().getParameter(world.renderer.getContext().getExtension('WEBGL_debug_renderer_info')?.UNMASKED_RENDERER_WEBGL||world.renderer.getContext().RENDERER)};}};
+if(new URLSearchParams(location.search).has('qa'))window.__game={get sim(){return sim},world,settings,input,begin,act,save,openMenu,closeMenu,enterPhoto,leavePhoto,THREE,bud:budModule,setView(yaw,pitch){world.yaw=yaw;world.pitch=pitch;},setState(state){Object.assign(sim,state);},metrics(){const sorted=[...frameTimes].sort((a,b)=>a-b);return{fps:1000/(frameTimes.reduce((a,b)=>a+b,0)/frameTimes.length),p95ms:sorted[Math.floor(sorted.length*.95)],triangles:world.renderer.info.render.triangles,calls:world.renderer.info.render.calls,assets:world.assetErrors,renderer:world.renderer.getContext().getParameter(world.renderer.getContext().getExtension('WEBGL_debug_renderer_info')?.UNMASKED_RENDERER_WEBGL||world.renderer.getContext().RENDERER)};}};

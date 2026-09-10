@@ -37,17 +37,17 @@ export function prepareInteractionFrame(world,dt,sim,input,settings){
  world.camera.updateMatrixWorld(true);
  const hole=sim.phase==='hole'&&held('bottle');
  const bottle=world.items.bottle,pipe=world.items.pipe;
- let b=world.home.bottle,bq=q(),bParent=null,bKey='rest';
+ let b=world.home.bottle,bq=q(-1.7768,.1651,.7989),bParent=null,bKey='rest';
  if(held('bottle')){
   bParent=world.camera;b=v(-.08,-.15,-.64);bKey='held';
   if(hole){b=v(-.07,.025,-.45);bq=q(-2.05,1.05,.12);bKey='bottom';}
   else if(sim.phase==='inhale'){b=v(0,-.23,-.22);bq=q(.22,0,0);bKey='inhale';}
   // Bottle tilted on its side with mouth submerged into stream water, not
   // pointing downward. Physics: water flows into the angled open mouth.
-  else if(fill){bParent=null;b=v(world.streamX(.8)+.11,-.035,.8);bq=q(0.25,0,Math.PI*.47);bKey='fill';}
+  else if(fill){bParent=null;b=v(world.streamX(.8)+.112,-.135,.784);bq=q(0.22,0,Math.PI*.39);bKey='fill';}
  }
  pose(world,'bottle',bKey,bParent,b,bq,dt);
- let p=world.home.pipe,pq=q(0,0,Math.PI*.5),pParent=null,pKey='rest';
+  let p=world.home.pipe,pq=q(1.244,-.1329,-.1852),pParent=null,pKey='rest';
  const assembling=['screw','uncap','unscrew','press'].includes(sim.mode);
  if((sim.cap&&sim.prep>0)||assembling){
   pParent=bottle;p=v(0,.226,0);pq=q();pKey='attached';
@@ -63,9 +63,9 @@ export function prepareInteractionFrame(world,dt,sim,input,settings){
  world.spareCap.visible=sim.prep===0&&sim.cap;
  if(world.meltRim)world.meltRim.visible=sim.outlet;
  const bagHeld=held('bag')&&!sim.upgraded;
- pose(world,'bag',bagHeld?'held':'rest',bagHeld?world.camera:null,bagHeld?v(-.22,-.12,-.57):world.home.bag,bagHeld?q(-.12):q(-1.25,0,-.2),dt);
+  pose(world,'bag',bagHeld?'held':'rest',bagHeld?world.camera:null,bagHeld?v(-.22,-.12,-.57):world.home.bag,bagHeld?q(-.12):q(-1.453,-.0931,.9055),dt);
  const aiming=held('lighter')&&['heat','hole','ignite','auto'].includes(sim.mode);
- if(!aiming)pose(world,'lighter',held('lighter')?'held':'rest',held('lighter')?world.camera:null,held('lighter')?v(.17,-.13,-.49):world.home.lighter,held('lighter')?q(0,0,.12):q(0,0,-.25),dt);
+  if(!aiming)pose(world,'lighter',held('lighter')?'held':'rest',held('lighter')?world.camera:null,held('lighter')?v(.17,-.13,-.49):world.home.lighter,held('lighter')?q(0,0,.12+T.MathUtils.degToRad(sim.angle)):q(1.5708,0,0),dt);
  world.scene.updateMatrixWorld(true);
  world.target.copy(world.targetPoint(sim));
  if(aiming){
@@ -80,10 +80,10 @@ export function prepareInteractionFrame(world,dt,sim,input,settings){
   const destination=contact.clone().sub(v(0,.021,0)).sub((world.nozzle||world.flameAnchor).clone().applyQuaternion(worldQ));
   pose(world,'lighter','aimed',world.camera,world.camera.worldToLocal(destination),localQ,dt);
  }
- if(world.flameShader){
+ if(world.flameShader||world.nozzle){
   const lighter=world.items.lighter;
   world.flame.quaternion.copy(lighter.quaternion).invert().multiply(q(0,world.camera.rotation.y,0));
-  world.flame.position.copy(world.nozzle);
+  if(world.nozzle)world.flame.position.copy(world.nozzle);
  }
  world.scene.updateMatrixWorld(true);
  world.aimScreen=world.screen(world.target);

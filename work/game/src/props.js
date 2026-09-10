@@ -20,17 +20,18 @@ function canvasTexture(width,height,draw){
  const texture=new T.CanvasTexture(canvas);texture.colorSpace=T.SRGBColorSpace;texture.anisotropy=8;return texture;
 }
 function thinShellResponse(material,face,edge){
- // The ordinary transparent material scales even grazing reflections by one
- // uniform alpha, erasing thin clear objects against textured backgrounds.
- // Retain face transparency while allowing real surface normals to reveal
- // reflected rims, moulded ribs and the polished glass wall at grazing angles.
+ // Authentic thin PET plastic response: retains crystal transparency while
+ // enhancing dielectric grazing reflections, moulded rib catch-lights, and
+ // subtle plastic surface sheen without the dark refractive opacity of glass.
  material.onBeforeCompile=shader=>{
   shader.fragmentShader=shader.fragmentShader.replace('#include <opaque_fragment>',`
-float shellGrazing=pow(1.-abs(dot(normal,normalize(vViewPosition))),2.4);
+float shellGrazing=pow(1.-abs(dot(normalize(normal),normalize(vViewPosition))),2.2);
 diffuseColor.a=mix(${face.toFixed(3)},${edge.toFixed(3)},shellGrazing);
+vec3 plasticSheen=vec3(.16,.21,.18)*pow(shellGrazing,1.8)*.42;
+outgoingLight+=plasticSheen;
 #include <opaque_fragment>`);
  };
- material.customProgramCacheKey=()=>`thin-shell-${face}-${edge}`;
+ material.customProgramCacheKey=()=>`thin-shell-pet-${face}-${edge}`;
 }
 function borosilicateResponse(material){
  // Keep the broad face optically clear while giving the very thin wall a
@@ -185,83 +186,431 @@ function rebuildPipe(world){
  const glass=new T.MeshPhysicalMaterial({color:'#f4fbf7',roughness:.05,metalness:0,transmission:1,thickness:.0007,ior:1.474,transparent:false,opacity:1,depthWrite:false,side:T.DoubleSide,envMapIntensity:1.8,clearcoat:.45,clearcoatRoughness:.06});
  borosilicateResponse(glass);
  world.pipeMat=glass;world.pipeGlass=add(pipe,'Slim borosilicate one-hitter',lathe(profile,96),glass);world.pipeGlass.renderOrder=5;
- // Cap aperture sized down for the slimmer stem.
- world.capmesh.geometry.dispose();world.capmesh.geometry=lathe([[.00370,.006],[.0125,.006],[.0132,.005],[.0132,-.006],[.0128,-.007],[.0122,-.007],[.0122,.004],[.00370,.004],[.00370,.006]],80);
- capMaterial.color.set('#365546');capMaterial.roughness=.5;
- world.pipeGrommet=add(pipe,'Cap aperture seal',lathe([[.00315,.005],[.00445,.005],[.00475,.006],[.00478,.007],[.00460,.008],[.00328,.008],[.00315,.005]],64,true),new T.MeshStandardMaterial({color:'#262b27',roughness:.7}));
- // Localized progressive residue along the entire interior bore (bowl rim to mouthpiece).
- const residueProfile=[
-  [.00456,.0465],[.00425,.0454],[.00395,.0432],[.00355,.0397],
-  [.00311,.0357],[.00286,.0317],[.00267,.0287],[.00266,.0238],
-  [.00264,.0168],[.00264,.0000],[.00264,-.0150],[.00264,-.0325],
-  [.00266,-.0425],[.00290,-.0484]
+  // Authentic 28mm knurled water bottle cap geometry for pipe assembly
+  world.capmesh.geometry.dispose();world.capmesh.geometry=createCapGeometry(true,64);
+  capMaterial.color.set('#1e5236');capMaterial.roughness=.36;capMaterial.metalness=.01;
+  world.pipeGrommet=add(pipe,'Cap aperture seal',lathe([[.00315,.005],[.00445,.005],[.00475,.006],[.00478,.007],[.00460,.008],[.00328,.008],[.00315,.005]],64,true),new T.MeshStandardMaterial({color:'#262b27',roughness:.7}));
+  // Localized progressive residue along the entire interior bore (bowl rim to mouthpiece).
+  const residueProfile=[
+   [.00456,.0465],[.00425,.0454],[.00395,.0432],[.00355,.0397],
+   [.00311,.0357],[.00286,.0317],[.00267,.0287],[.00266,.0238],
+   [.00264,.0168],[.00264,.0000],[.00264,-.0150],[.00264,-.0325],
+   [.00266,-.0425],[.00290,-.0484]
+  ];
+  const residueTexture=createPipeResidueTexture(world);
+  const residueMaterial=new T.MeshStandardMaterial({map:residueTexture,roughness:.38,metalness:.02,transparent:true,opacity:1,depthWrite:false,side:T.DoubleSide});
+  const residue=add(pipe,'Inner amber residue',lathe(residueProfile,64),residueMaterial);residue.renderOrder=4;residue.userData.pickable=false;
+  world.pipeResidue=residue;
+  world.hotTip.geometry.dispose();world.hotTip.geometry=lathe([[.00315,-.004],[.00355,-.004],[.00355,.003],[.00315,.003]],48);world.hotTip.position.set(0,-.044,0);world.hotTip.userData.pickable=false;
+  world.bowlBud.position.set(0,.040,0);world.bowlBud.scale.set(1.0,1.0,1.0);world.bowlBud.userData.pickable=false;
+  world.emberLight.position.set(0,.042,0);
+  mark(world,pipe,'pipe');
+  world.heroProps.pipe=world.pipeGlass;
+ }
+
+function createCapGeometry(hasAperture=false,segments=64){
+ const profile=[
+  hasAperture?[.00370,.0055]:[.0001,.0055],
+  [.0028,.0057],
+  [.0134,.0055],
+  [.0152,.0042],
+  [.01535,.0030],
+  [.01535,-.0105], // knurled skirt down to tamper groove
+  [.0146,-.0112],  // tamper break groove
+  [.0150,-.0118],  // tamper band upper
+  [.0150,-.0152],  // tamper band lower
+  [.0142,-.0155],  // bottom lip turn
+  [.0138,-.0135],  // inner tamper band wall
+  [.0135,-.0090],  // inner skirt wall
+  [.0135,.0035],   // inner ceiling corner
+  hasAperture?[.00370,.0035]:[.0001,.0035]
  ];
- const residueTexture=createPipeResidueTexture(world);
- const residueMaterial=new T.MeshStandardMaterial({map:residueTexture,roughness:.38,metalness:.02,transparent:true,opacity:1,depthWrite:false,side:T.DoubleSide});
- const residue=add(pipe,'Inner amber residue',lathe(residueProfile,64),residueMaterial);residue.renderOrder=4;residue.userData.pickable=false;
- world.pipeResidue=residue;
- world.hotTip.geometry.dispose();world.hotTip.geometry=lathe([[.00315,-.004],[.00355,-.004],[.00355,.003],[.00315,.003]],48);world.hotTip.position.set(0,-.044,0);world.hotTip.userData.pickable=false;
- world.bowlBud.position.set(0,.040,0);world.bowlBud.scale.set(1.0,.65,1.0);world.bowlBud.userData.pickable=false;
- world.emberLight.position.set(0,.042,0);
- mark(world,pipe,'pipe');
- world.heroProps.pipe=world.pipeGlass;
+ if(hasAperture)profile.splice(1,1);
+ const geo=lathe(profile,segments);
+ const pos=geo.attributes.position;
+ for(let i=0;i<pos.count;i++){
+  let x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i);
+  const r=Math.hypot(x,z),a=Math.atan2(x,z);
+  if(r>.0148&&y>-.0105&&y<.0038){
+   const knurl=(Math.sin(a*48)>0?.00038:-.00014);
+   const nr=r+knurl;x*=nr/r;z*=nr/r;
+  }
+  if(r>.0145&&y>-.0118&&y<-.0108){
+   const bridge=Math.pow(Math.max(0,Math.cos(a*8)),12);
+   const indent=(1-bridge)*-.00045;
+   const nr=Math.max(.0140,r+indent);x*=nr/r;z*=nr/r;
+  }
+  pos.setXYZ(i,x,y,z);
+ }
+ geo.computeVertexNormals();
+ return geo;
 }
 
-function bottleLabel(){return canvasTexture(1536,384,(c,w,h)=>{
- c.fillStyle='#e4e8d9';c.fillRect(0,0,w,h);
- c.fillStyle='#254937';c.fillRect(0,0,w,9);c.fillRect(0,h-9,w,9);
- for(const x of [w*.25,w*.75]){
-  c.strokeStyle='#849784';c.lineWidth=2;c.beginPath();c.moveTo(x-165,112);c.lineTo(x-65,35);c.lineTo(x-28,74);c.lineTo(x+16,24);c.lineTo(x+112,112);c.stroke();
-  c.fillStyle='#264535';c.textAlign='center';c.font='500 55px Georgia';c.fillText('STILLWATER',x,179);
-  c.font='18px Arial';c.fillText('N A T U R A L   S P R I N G   W A T E R',x,219);
-  c.fillStyle='#5b735e';c.font='15px Arial';c.fillText('BOTTLED AT THE SOURCE  ·  500 mL',x,263);
-  c.font='13px Arial';c.fillText('100% RECYCLED PET  /  PLEASE RECYCLE',x,301);
-  c.fillStyle='#293d2b';for(let i=0;i<40;i++)c.fillRect(x-69+i*3.45,322,(i%3)+.5,25);
+function createPetNormalTexture(){
+ const w=1024,h=1024;
+ const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+ const ctx=canvas.getContext('2d');
+ const imgData=ctx.createImageData(w,h);
+ const data=imgData.data;
+
+ for(let y=0;y<h;y++){
+  const v=y/(h-1);
+  const drawLine=Math.sin(v*720.0)*0.035;
+  const ribAccent=Math.sin(v*64.0)*0.030*(v>0.15&&v<0.70?1:0);
+
+  for(let x=0;x<w;x++){
+   const u=x/(w-1);
+   let nx=0,ny=drawLine+ribAccent;
+
+   // Parting lines at u = 0.25 and u = 0.75
+   const du1=Math.abs(u-0.25),du2=Math.abs(u-0.75);
+   const du=Math.min(du1,du2);
+   if(du<0.0045){
+    const sign=((u>0.25&&u<0.25+0.0045)||(u>0.75&&u<0.75+0.0045))?-1:1;
+    nx+=Math.sin(du/0.0045*Math.PI)*sign*0.45;
+   }
+
+   // Thin membrane micro-crinkle waviness
+   if(v>0.08&&v<0.88){
+    const wave1=Math.sin(u*18.0+v*24.0);
+    const wave2=Math.cos(u*32.0-v*38.0);
+    const crinkle=(wave1*0.55+wave2*0.45)*0.045;
+    nx+=crinkle;ny+=crinkle*0.6;
+   }
+
+   // Base mold gate ring (v < 0.05)
+   if(v<0.05){
+    const gateDist=Math.abs(v-0.025)/0.012;
+    if(gateDist<1.0)ny+=Math.sin(gateDist*Math.PI)*0.25;
+   }
+
+   const nz=1.0;
+   const len=Math.sqrt(nx*nx+ny*ny+nz*nz);
+   const idx=(y*w+x)*4;
+   data[idx]=Math.floor(((nx/len)*0.5+0.5)*255);
+   data[idx+1]=Math.floor(((ny/len)*0.5+0.5)*255);
+   data[idx+2]=Math.floor(((nz/len)*0.5+0.5)*255);
+   data[idx+3]=255;
+  }
  }
+ ctx.putImageData(imgData,0,0);
+ const texture=new T.CanvasTexture(canvas);
+ texture.wrapS=T.RepeatWrapping;texture.wrapT=T.ClampToEdgeWrapping;
+ texture.anisotropy=8;
+ return texture;
+}
+
+function createLabelNormalTexture(){
+ const w=1024,h=512;
+ const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+ const ctx=canvas.getContext('2d');
+ const imgData=ctx.createImageData(w,h);
+ const data=imgData.data;
+
+ for(let y=0;y<h;y++){
+  const v=y/(h-1);
+  const edgeTension=Math.exp(-(((v-0.06)/0.04)**2))+Math.exp(-(((v-0.94)/0.04)**2));
+  const tensionRipple=Math.sin(v*120.0)*0.06*edgeTension;
+
+  for(let x=0;x<w;x++){
+   const u=x/(w-1);
+   let nx=0,ny=tensionRipple;
+
+   // Vertical glue overlap seam step at u = 0.0 / 1.0
+   if(u<0.015){
+    nx+=(1.0-u/0.015)*0.35;
+   }else if(u>0.985){
+    nx-=(u-0.985)/0.015*0.35;
+   }
+
+   const nz=1.0;
+   const len=Math.sqrt(nx*nx+ny*ny+nz*nz);
+   const idx=(y*w+x)*4;
+   data[idx]=Math.floor(((nx/len)*0.5+0.5)*255);
+   data[idx+1]=Math.floor(((ny/len)*0.5+0.5)*255);
+   data[idx+2]=Math.floor(((nz/len)*0.5+0.5)*255);
+   data[idx+3]=255;
+  }
+ }
+ ctx.putImageData(imgData,0,0);
+ const texture=new T.CanvasTexture(canvas);
+ texture.wrapS=T.RepeatWrapping;texture.wrapT=T.ClampToEdgeWrapping;
+ texture.anisotropy=8;
+ return texture;
+}
+
+function bottleLabel(){return canvasTexture(2048,512,(c,w,h)=>{
+ c.fillStyle='#e4e9dc';c.fillRect(0,0,w,h);
+ // Top and bottom dark green brand border bars
+ c.fillStyle='#1c442c';c.fillRect(0,0,w,12);c.fillRect(0,h-12,w,12);
+ c.fillStyle='#43664d';c.fillRect(0,12,w,2);c.fillRect(0,h-14,w,2);
+
+ // FRONT PANEL (centered at x = w * 0.50): main spring water branding
+ const fx=w*0.50;
+ // Expiration / Lot code dot-matrix imprint on upper margin
+ c.fillStyle='#46584c';c.font='12px monospace';c.textAlign='left';
+ c.fillText('BB 09/27 LOT 284A 11:47',fx-160,32);
+
+ // Mountain range emblem
+ c.strokeStyle='#6c8770';c.lineWidth=2.5;c.beginPath();
+ c.moveTo(fx-150,120);c.lineTo(fx-60,42);c.lineTo(fx-25,82);c.lineTo(fx+18,30);c.lineTo(fx+108,120);c.stroke();
+ c.strokeStyle='#98ab9a';c.lineWidth=1.5;c.beginPath();
+ c.moveTo(fx-110,120);c.lineTo(fx-60,65);c.lineTo(fx-10,105);c.lineTo(fx+35,60);c.lineTo(fx+85,120);c.stroke();
+
+ // Title typography
+ c.fillStyle='#1d3e2a';c.textAlign='center';c.font='500 62px Georgia';
+ c.fillText('STILLWATER',fx,186);
+ c.font='600 19px Arial';c.fillStyle='#274c33';
+ c.fillText('N A T U R A L   S P R I N G   W A T E R',fx,226);
+ c.font='500 15px Arial';c.fillStyle='#47654f';
+ c.fillText('BOTTLED AT THE SOURCE  ·  500 mL',fx,268);
+ c.font='600 13px Arial';c.fillStyle='#47654f';
+ c.fillText('100% RECYCLED PET  /  PLEASE RECYCLE',fx,306);
+
+ // BACK PANEL LEFT (x = w * 0.16): mineral analysis table
+ const mlx=w*0.16;
+ c.fillStyle='#1d3e2a';c.textAlign='center';c.font='700 15px Arial';
+ c.fillText('TYPICAL ANALYSIS (mg/L)',mlx,62);
+ c.font='13px Arial';c.fillStyle='#2c4634';
+ c.fillText('Ca²⁺: 26.4    Mg²⁺: 8.2    Na⁺: 5.6',mlx,96);
+ c.fillText('K⁺: 1.2      HCO₃⁻: 112   pH: 7.3',mlx,124);
+ c.font='12px Arial';c.fillStyle='#47654f';
+ c.fillText('Source: Deep Aquifer Springs, Pine Hollow.',mlx,160);
+ c.fillText('Naturally filtered through glacial gravel.',mlx,182);
+
+ // BACK PANEL RIGHT (x = w * 0.84): Barcode and PET recycling emblem
+ const brx=w*0.84;
+ c.fillStyle='#ffffff';c.fillRect(brx-90,68,180,94);
+ c.fillStyle='#162419';
+ for(let i=0;i<44;i++){
+  const lw=((i*7+5)%3===0)?3:1.4;
+  c.fillRect(brx-80+i*3.65,76,lw,62);
+ }
+ c.font='12px monospace';c.textAlign='center';
+ c.fillText('0  41800 29104  7',brx,152);
+
+ // Recycling symbol
+ c.strokeStyle='#2c4634';c.lineWidth=2;c.beginPath();
+ c.arc(brx,220,16,0,Math.PI*2);c.stroke();
+ c.fillStyle='#2c4634';c.font='700 13px Arial';c.fillText('1',brx,225);
+ c.font='10px Arial';c.fillText('PET',brx,248);
+
+ // Vertical glue overlap strip at label edges (wrapping around back)
+ c.fillStyle='rgba(215,225,205,0.45)';c.fillRect(0,0,24,h);c.fillRect(w-24,0,24,h);
+ c.strokeStyle='rgba(130,150,130,0.6)';c.lineWidth=1.5;
+ c.beginPath();c.moveTo(24,0);c.lineTo(24,h);c.moveTo(w-24,0);c.lineTo(w-24,h);c.stroke();
 });}
 
 function rebuildBottle(world){
  const bottle=world.items.bottle;
  removeTree(world,bottle,new Set([world.liquid.volume,world.bottleSmoke,world.spareCap,world.outlet]));
+
+ // Authentic disposable 500 mL thin PET spring water bottle profile:
+ // Prominent molded corrugation ribs (hoop reinforcement), recessed label waist,
+ // stepped shoulder dome flutes, 5-petal petaloid base, and standard 28mm PCO finish.
  const outer=[
-  [.001,.009],[.011,.009],[.018,.006],[.025,.0028],[.029,.006],
-  [.0318,.015],[.0325,.025],[.03255,.036],[.0318,.038],[.0315,.040],
-  [.03245,.043],[.0325,.048],[.03165,.050],[.03155,.052],[.0323,.055],
-  [.03225,.060],[.0322,.109],[.0323,.117],[.0313,.119],[.03115,.121],
-  [.0323,.124],[.0324,.129],[.03115,.131],[.0311,.133],[.0323,.136],
-  [.0322,.144],[.0313,.154],[.0294,.165],[.0258,.179],[.0200,.192],
-  [.0141,.202],[.0133,.205],[.0151,.207],[.0151,.2085],[.0133,.210],
-  [.01325,.222],[.0131,.225],[.0127,.226],[.0120,.226]
+  // 1. Push-up base dome & sprue gate center
+  [.0005,.0070],
+  [.0025,.0068],
+  [.0060,.0055],
+  [.0110,.0042],
+  [.0170,.0022],
+  [.0220,.0008],
+  [.0255,.0002], // 5-petal contact foot ring (lowest standing point)
+  [.0285,.0022],
+  [.0308,.0075],
+  [.0320,.0155], // heel sweep
+  [.0324,.0235], // lower body
+  [.0326,.0320], // outlet level (anchor matches x=.0326, y=.032, z=0)
+  [.0326,.0365],
+
+  // 2. Deep lower molded corrugation ribs (hoop reinforcement)
+  [.0312,.0385],
+  [.0298,.0405], // rib 1 deep groove
+  [.0314,.0425],
+  [.0326,.0445], // rib 1 crest
+  [.0312,.0465],
+  [.0298,.0485], // rib 2 deep groove
+  [.0314,.0505],
+  [.0326,.0525], // rib 2 crest
+  [.0312,.0545],
+  [.0300,.0565], // rib 3 groove
+  [.0326,.0590], // lower label bumper
+
+  // 3. Recessed label panel waist
+  [.03205,.0605],
+  [.03200,.0750],
+  [.03185,.0895], // subtle waist center
+  [.03200,.1040],
+  [.03205,.1185],
+  [.0326,.1205],  // upper label bumper
+
+  // 4. Deep upper molded grip ribs (corrugations above label)
+  [.0312,.1225],
+  [.0297,.1245], // rib 4 deep groove
+  [.0313,.1265],
+  [.0326,.1285], // rib 4 crest
+  [.0312,.1305],
+  [.0296,.1325], // rib 5 deep groove
+  [.0313,.1345],
+  [.0326,.1365], // rib 5 crest
+  [.0312,.1385],
+  [.0297,.1405], // rib 6 deep groove
+  [.0313,.1425],
+  [.0325,.1445], // rib 6 crest
+  [.0314,.1465],
+  [.0302,.1485], // rib 7 groove
+  [.0324,.1510], // shoulder start ring
+
+  // 5. Shoulder dome with stepped ring bands
+  [.0315,.1550],
+  [.0295,.1590], // shoulder step 1 groove
+  [.0308,.1610], // shoulder step 1 ridge
+  [.0296,.1660],
+  [.0270,.1710], // shoulder step 2 groove
+  [.0284,.1730], // shoulder step 2 ridge
+  [.0262,.1790],
+  [.0232,.1860],
+  [.0196,.1930],
+  [.0158,.2000],
+  [.0135,.2050], // neck base
+
+  // 6. Standard 28mm PCO neck finish
+  [.0134,.2068], // neck support collar underside
+  [.0168,.2075], // support collar flange rim
+  [.0168,.2090], // support collar flange top
+  [.0134,.2096], // collar top land
+  [.0134,.2105],
+  [.0145,.2115], // tamper-evident locking bead crest
+  [.0133,.2125],
+  [.0132,.2140], // thread zone root
+  [.0132,.2220],
+  [.0131,.2245],
+  [.0128,.2260], // outer mouth lip rim (y = 0.226)
+  [.0118,.2260], // inner lip rim
+  [.0118,.2050]  // inner neck bore
  ];
- const inner=outer.slice(0,-1).reverse().map(([r,y])=>[Math.max(.0001,r-.00032),y<.018?y+.0004:y]);
- const geometry=lathe([...outer,...inner,[.001,.009]],96);
+
+ const bodyOuter=outer.slice(0,-2);
+ const bodyInner=bodyOuter.slice(0,-1).reverse().map(([r,y])=>{
+  const thick=y>.205?.0010:.00025;
+  return [Math.max(.0001,r-thick),y<.012?y+.0003:y];
+ });
+ const geometry=lathe([...bodyOuter,...bodyInner,[.0005,.0070]],96);
  const positions=geometry.attributes.position;
+
  for(let i=0;i<positions.count;i++){
-  let x=positions.getX(i),y=positions.getY(i),z=positions.getZ(i),r=Math.hypot(x,z);const a=Math.atan2(x,z);
-  if(r>.005){
-   const feet=Math.max(0,1-y/.022);const dent=Math.exp(-(((y-.151)/.03)**2))*Math.exp(-(((a-.65)/.42)**2))*-.00065;
-   const seam=Math.pow(Math.abs(Math.cos(a)),90)*.000075;
-   const ripple=Math.sin(a*6+y*210)*.000065*Math.sin(Math.min(1,y/.03)*Math.PI*.5);
-   const nr=r+Math.cos(a*5)*.00125*feet+dent+seam+ripple;x*=nr/r;z*=nr/r;
-   if(y<.014)y+=feet*(1-Math.cos(a*5))*.00055;
+  let x=positions.getX(i),y=positions.getY(i),z=positions.getZ(i);
+  const r=Math.hypot(x,z),a=Math.atan2(x,z);
+  if(r>.004){
+   // 5-petal petaloid base modulation at bottom
+   const footT=Math.max(0,1.0-y/.024);
+   const petal=Math.cos(a*5);
+   const deltaR=petal*.0020*footT;
+   if(y<.020)y+=Math.max(0,-petal)*.0060*footT;
+
+   // Split-mold vertical parting seam (peaks along x = +/- r flanks)
+   const seamT=Math.pow(Math.abs(Math.sin(a)),60);
+   const seam=seamT*.00028*(y<.206?1:0);
+
+   // Shoulder dome radial pinch flutes
+   let flute=0;
+   if(y>=.155&&y<=.198){
+    const fluteT=Math.sin((y-.155)/(.198-.155)*Math.PI);
+    flute=Math.pow(.5+.5*Math.cos(a*8),2.5)*.00042*fluteT;
+   }
+
+   // Subtle flexible plastic panel deformations (natural handling depressions)
+   const dent1=Math.exp(-(((y-.105)/.025)**2))*Math.exp(-(((a-.80)/.55)**2))*-.00085;
+   const dent2=Math.exp(-(((y-.138)/.022)**2))*Math.exp(-(((a+2.15)/.60)**2))*-.00065;
+
+   // Thin membrane waviness / subtle crinkle
+   const crinkle=Math.sin(a*6+y*185)*.000085*Math.sin(Math.min(1,y/.035)*Math.PI*(y<.16?1:Math.max(0,1-(y-.16)/.04)));
+
+   const nr=r+deltaR+seam+flute+dent1+dent2+crinkle;
+   x*=nr/r;z*=nr/r;
+  }else if(r<.0030&&y<.010){
+   // Central sprue gate injection mark nub
+   y+=Math.max(0,1.0-r/.0030)*.0006;
   }
   positions.setXYZ(i,x,y,z);
  }
  geometry.computeVertexNormals();
- // Clear PET uses a thin, lightly reflective shell. Strong rough transmission
- // blurred the complete background into a frosted laboratory-glass silhouette.
- const pet=new T.MeshPhysicalMaterial({color:'#f7fcfa',roughness:.115,metalness:0,transmission:.12,thickness:.00032,ior:1.57,transparent:true,opacity:.15,depthWrite:false,side:T.FrontSide,envMapIntensity:.85,clearcoat:.55,clearcoatRoughness:.14});
- thinShellResponse(pet,.15,.96);
- world.petMat=pet;const shell=add(bottle,'Thin moulded PET shell',geometry,pet);shell.renderOrder=6;
- const wrap=add(bottle,'Upright spring-water label',new T.CylinderGeometry(.03248,.03248,.049,96,1,true),new T.MeshStandardMaterial({map:bottleLabel(),roughness:.57,metalness:0,side:T.FrontSide}),V(0,.0845,0));wrap.rotation.y=Math.PI/2;wrap.renderOrder=3;
- // A shallow real helical neck thread, separate from the thin shell.
- const threadPoints=[];for(let i=0;i<=144;i++){const a=i/144*Math.PI*4.35;threadPoints.push(V(Math.sin(a)*.01343,.212+i/144*.010,Math.cos(a)*.01343));}
- const neck=add(bottle,'Moulded neck thread',new T.TubeGeometry(new T.CatmullRomCurve3(threadPoints),144,.00048,6,false),pet);neck.renderOrder=6;
- const rimMaterial=new T.MeshPhysicalMaterial({color:'#a6997a',roughness:.38,transparent:true,opacity:.62,depthWrite:false,side:T.DoubleSide});
- world.meltRim=add(bottle,'Heat-formed outlet lip',new T.TorusGeometry(.00275,.00043,10,32),rimMaterial,V(.03265,.032,0));world.meltRim.rotation.y=Math.PI/2;world.meltRim.visible=false;world.meltRim.renderOrder=7;
- world.outlet.position.set(.0326,.032,0);world.outlet.rotation.y=Math.PI/2;world.outlet.renderOrder=7;
- mark(world,bottle,'bottle');world.liquid.volume.userData.pickable=false;world.bottleSmoke.userData.pickable=false;
- world.heroProps.bottle=shell;world.heroProps.bottleLabel=wrap;
+
+ // High-grade thin PET PBR material: crystal-clear facing transmission, smooth
+ // exterior film clearcoat, normal crinkles and extrusion striations, grazing dielectric Fresnel.
+ const pet=new T.MeshPhysicalMaterial({
+  color:'#f8fdfb',
+  roughness:.08,
+  metalness:0,
+  transmission:.06,
+  thickness:.00025,
+  ior:1.57,
+  transparent:true,
+  opacity:.14,
+  depthWrite:false,
+  side:T.FrontSide,
+  envMapIntensity:1.05,
+  clearcoat:1.0,
+  clearcoatRoughness:.04,
+  normalMap:createPetNormalTexture(),
+  normalScale:new T.Vector2(.38,.38)
+ });
+ thinShellResponse(pet,.05,.96);
+ world.petMat=pet;
+ const shell=add(bottle,'Thin moulded PET shell',geometry,pet);
+ shell.renderOrder=6;
+
+ // Polypropylene wrap label: fits the recessed panel with vertical glue seam and BOPP sheen
+ const wrap=add(bottle,'Upright spring-water label',
+  new T.CylinderGeometry(.03212,.03212,.0585,96,1,true),
+  new T.MeshPhysicalMaterial({
+   map:bottleLabel(),
+   normalMap:createLabelNormalTexture(),
+   roughness:.25,
+   metalness:0,
+   clearcoat:.70,
+   clearcoatRoughness:.08,
+   side:T.FrontSide
+  }),
+  V(0,.08925,0)
+ );
+ wrap.rotation.y=Math.PI; // Aligns front brand panel towards camera (+Z) and seam to back
+ wrap.renderOrder=3;
+
+ // Authentic helical neck screw thread between tamper bead and mouth rim
+ const threadPoints=[];
+ for(let i=0;i<=144;i++){
+  const a=i/144*Math.PI*4.4;
+  const tY=.2135+(i/144)*.0095;
+  threadPoints.push(V(Math.sin(a)*.01348,tY,Math.cos(a)*.01348));
+ }
+ const neck=add(bottle,'Moulded neck thread',new T.TubeGeometry(new T.CatmullRomCurve3(threadPoints),144,.00045,8,false),pet);
+ neck.renderOrder=6;
+
+ // Believable 28mm plastic screw cap on unprepared bottle
+ const capMaterial=new T.MeshPhysicalMaterial({color:'#1c4e33',roughness:.34,metalness:.01,clearcoat:.35,clearcoatRoughness:.18});
+ world.spareCap.geometry.dispose();
+ world.spareCap.geometry=createCapGeometry(false,64);
+ world.spareCap.material=capMaterial;
+ world.spareCap.position.set(0,.226,0);
+ world.spareCap.renderOrder=4;
+
+ // Heat-formed curled outlet puncture rim (charred melted PET)
+ const rimMaterial=new T.MeshPhysicalMaterial({color:'#3d2b18',roughness:.40,transmission:.12,opacity:.82,transparent:true,depthWrite:false,side:T.DoubleSide,clearcoat:.45});
+ world.meltRim=add(bottle,'Heat-formed outlet lip',new T.TorusGeometry(.00275,.00045,12,32),rimMaterial,V(.03265,.032,0));
+ world.meltRim.rotation.y=Math.PI/2;
+ world.meltRim.visible=false;
+ world.meltRim.renderOrder=7;
+ world.outlet.position.set(.0326,.032,0);
+ world.outlet.rotation.y=Math.PI/2;
+ world.outlet.renderOrder=7;
+
+ mark(world,bottle,'bottle');
+ world.liquid.volume.userData.pickable=false;
+ world.bottleSmoke.userData.pickable=false;
+ world.heroProps.bottle=shell;
+ world.heroProps.bottleLabel=wrap;
 }
 
 function correctLighter(world){

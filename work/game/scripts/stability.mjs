@@ -30,7 +30,7 @@ try{
      const capLocal=w.items.bottle.worldToLocal(w.items.pipe.getWorldPosition(object.position.clone()));
      const label=document.getElementById('label-bottle'),rect=label.getBoundingClientRect(),anchor=w.projected.bottle;
      const hot=w.screen(w.items.lighter.localToWorld(w.nozzle.clone()).add(w.nozzle.clone().set(0,.021,0)));
-     return{local:local.toArray(),poseKey:w.poses[id].key,poseTime:w.poses[id].elapsed,flameAimErrorPixels:Math.hypot(hot.x-g.input.x,hot.y-g.input.y),capOffset:capLocal.distanceTo(capLocal.clone().set(0,.228,0)),labelError:label.classList.contains('hidden')?null:Math.hypot(rect.x+rect.width/2-anchor.x,rect.bottom+14-anchor.y)};
+     return{local:local.toArray(),poseKey:w.poses[id].key,poseTime:w.poses[id].elapsed,flameAimErrorPixels:Math.hypot(hot.x-g.input.x,hot.y-g.input.y),capOffset:capLocal.distanceTo(capLocal.clone().set(0,.226,0)),labelError:label.classList.contains('hidden')?null:Math.hypot(rect.x+rect.width/2-anchor.x,rect.bottom+14-anchor.y)};
     }));
     if([10,22,34].includes(i))await page.screenshot({path:path.join(out,`${mode}-${fps}fps-${i}.png`)});
    }

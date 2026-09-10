@@ -8,6 +8,8 @@ import {smokeVolume} from './smoke.js';
 import {Liquid} from './liquid.js';
 import {flameMaterial} from './flame.js';
 import {upgradeHeroProps} from './props.js';
+import {createBudGeometry,createBudMaterial,renderBudSpriteDataUrl} from './bud.js';
+import {createWeedBag} from './weed-bag.js';
 import {buildForestFloor,forestHeight,forestBase,creekX,creekWidth,plantFerns,plantShrubs,plantGrass,plantPines,loadForestDetails,updateEnvironment} from './environment.js';
 import {prepareInteractionFrame} from './interaction-view.js';
 import {resolveLogicalHit,visibleSurface} from './picking.js';
@@ -76,6 +78,22 @@ export class World {
  async loadAssets(onProgress){
   const manager=new T.LoadingManager();manager.onProgress=(_,n,total)=>onProgress?.(n/total);const tl=new T.TextureLoader(manager);const gl=new GLTFLoader(manager);
   const texture=async(path,srgb=false,repeat=1)=>{const t=await tl.loadAsync(`./assets/${path}`);t.colorSpace=srgb?T.SRGBColorSpace:T.NoColorSpace;t.wrapS=t.wrapT=T.RepeatWrapping;t.repeat.set(repeat,repeat);t.anisotropy=8;return t;};
+  this.pineBarkReady=(async()=>{
+   const [map,normalMap,roughnessMap]=await Promise.all([
+    texture('pine_bark_4k/pine_bark_diff_4k.jpg',true,1),
+    texture('pine_bark_4k/pine_bark_nor_gl_4k.jpg',false,1),
+    texture('pine_bark_4k/pine_bark_rough_4k.jpg',false,1)
+   ]);
+   map.wrapS=map.wrapT=T.RepeatWrapping;
+   normalMap.wrapS=normalMap.wrapT=T.RepeatWrapping;
+   roughnessMap.wrapS=roughnessMap.wrapT=T.RepeatWrapping;
+   map.repeat.set(1.0,1.0);
+   normalMap.repeat.set(1.0,1.0);
+   roughnessMap.repeat.set(1.0,1.0);
+   map.anisotropy=16;normalMap.anisotropy=16;roughnessMap.anisotropy=16;
+   this.pineBarkPbr={map,normalMap,roughnessMap};
+   return this.pineBarkPbr;
+  })();
   const tasks=[loadForestDetails(this,gl,texture),
    (async()=>{const model=await gl.loadAsync('./assets/clipper.glb');this.upgradeLighter(model.scene);})(),
    (async()=>{const model=await gl.loadAsync('./assets/bottle.glb');this.upgradeBottle(model.scene);})(),
@@ -85,9 +103,9 @@ export class World {
    (async()=>{const [map,normalMap]=await Promise.all([texture('rock_boulder_dry/diff.jpg',true,2.5),texture('rock_boulder_dry/nor_gl.jpg',false,2.5)]);Object.assign(this.rockMat,{map,normalMap});this.rockMat.normalScale.set(.75,.75);this.rockMat.needsUpdate=true;})(),
    (async()=>{const [map,normalMap]=await Promise.all([texture('bark_brown_02/diff.jpg',true,3),texture('bark_brown_02/nor_gl.jpg',false,3)]);Object.assign(this.barkMat,{map,normalMap});this.barkMat.needsUpdate=true;})(),
    (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/fern_02/fern_02.gltf'),gl.loadAsync('./assets/fern_02_lod.glb')]);plantFerns(this,model.scene,lod.scene);})(),
-   (async()=>{const model=await gl.loadAsync('./assets/shrub_04_lod.glb');this.makeShrubs(model.scene);})(),
+   (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/shrub_04/shrub_04.gltf'),gl.loadAsync('./assets/shrub_04_lod.glb')]);this.makeShrubs(model.scene,lod.scene);})(),
    (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/grass_clumps_lod.glb'),gl.loadAsync('./assets/grass_far_lod.glb')]);plantGrass(this,model.scene,lod.scene);})(),
-   (async()=>{try{const model=await gl.loadAsync('./assets/pine.glb');this.makePines(model.scene);}catch(e){console.warn('Pine LOD unavailable',e.message);}})()
+   (async()=>{try{const [model]=await Promise.all([gl.loadAsync('./assets/pine.glb'),this.pineBarkReady]);this.makePines(model.scene);}catch(e){console.warn('Pine LOD unavailable',e.message);}})()
   ];const result=await Promise.allSettled(tasks);this.assetErrors=result.filter(r=>r.status==='rejected').map(r=>String(r.reason));if(this.assetErrors.length)console.error(this.assetErrors);upgradeHeroProps(this);this.renderer.compile(this.scene,this.camera);this._shadowState=null;this.renderer.shadowMap.needsUpdate=true;return this;
  }
  makeGround(){buildForestFloor(this);}
@@ -96,15 +114,120 @@ export class World {
  addWind(material,amp=.025){material.onBeforeCompile=shader=>{shader.uniforms.uTime={value:0};shader.uniforms.uWind={value:this.wind};shader.vertexShader='uniform float uTime; uniform float uWind;\n'+shader.vertexShader;shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`#include <begin_vertex>\n float sway = sin(uTime*1.3+position.x*1.8+position.z*.9)*${amp.toFixed(4)}*uWind; transformed.x += sway*max(0.,position.y); transformed.z += sway*.4*max(0.,position.y);`);this.windMats.push(shader);};material.customProgramCacheKey=()=>`wind${amp}`;}
   makeFerns(model){plantFerns(this,model);}
   makePines(model){plantPines(this,model);}
-  makeShrubs(model){plantShrubs(this,model);}
+  makeShrubs(model,lodModel){plantShrubs(this,model,lodModel);}
   makeGroundCover(model){plantGrass(this,model);}
   upgradeRocks(model,lodModel){
    const sources=[];model.traverse(o=>{if(o.isMesh)sources.push(o);});
    const lods=new Map();lodModel?.traverse(o=>{if(o.isMesh)lods.set(o.name,o);});
    const src=sources[0];if(!src)return;const g=src.geometry.clone();g.computeBoundingBox();const bounds=g.boundingBox,size=bounds.getSize(V()),center=bounds.getCenter(V());g.translate(-center.x,-bounds.min.y,-center.z);
-   const m=src.material.clone();m.roughness=.91;m.normalScale?.set(.9,.9);m.color.set('#c2c5b1');new T.TextureLoader().load('./assets/stone-detail.jpg',t=>{t.colorSpace=T.SRGBColorSpace;t.flipY=false;t.anisotropy=16;m.map=t;m.needsUpdate=true;});
+    const m=src.material.clone();
+    m.roughness=.88;m.metalness=0.0;m.normalScale=new T.Vector2(1.15,1.15);m.color.set('#d5d4c8');m.aoMapIntensity=1.0;
+    const tl=new T.TextureLoader();
+    const loadMap=(path,srgb=false)=>{
+      const t=tl.load(path,tex=>{
+        tex.colorSpace=srgb?T.SRGBColorSpace:T.NoColorSpace;
+        tex.flipY=false;tex.anisotropy=16;tex.minFilter=T.LinearMipmapLinearFilter;tex.generateMipmaps=true;
+        m.needsUpdate=true;
+      });
+      t.colorSpace=srgb?T.SRGBColorSpace:T.NoColorSpace;t.flipY=false;t.anisotropy=16;
+      return t;
+    };
+    m.map=loadMap('./assets/rock_moss_set_01/textures/diff_4k.jpg',true);
+    m.normalMap=loadMap('./assets/rock_moss_set_01/textures/nor_gl_4k.jpg',false);
+    m.roughnessMap=loadMap('./assets/rock_moss_set_01/textures/rough_4k.jpg',false);
+    m.aoMap=loadMap('./assets/rock_moss_set_01/textures/ao_4k.jpg',false);
+
+    const loadDetail=(path,srgb=false)=>{
+      const t=tl.load(path,tex=>{
+        tex.colorSpace=srgb?T.SRGBColorSpace:T.NoColorSpace;
+        tex.wrapS=tex.wrapT=T.RepeatWrapping;tex.anisotropy=16;tex.minFilter=T.LinearMipmapLinearFilter;tex.generateMipmaps=true;
+        m.needsUpdate=true;
+      });
+      t.colorSpace=srgb?T.SRGBColorSpace:T.NoColorSpace;t.wrapS=t.wrapT=T.RepeatWrapping;t.anisotropy=16;
+      return t;
+    };
+    const uMicroDiff={value:loadDetail('./assets/rock_boulder_dry/diff_4k.jpg',true)};
+    const uMicroNormal={value:loadDetail('./assets/rock_boulder_dry/nor_gl_4k.jpg',false)};
+    const uMicroRough={value:loadDetail('./assets/rock_boulder_dry/rough_4k.jpg',false)};
+    const uMicroAO={value:loadDetail('./assets/rock_boulder_dry/ao_4k.jpg',false)};
+    const uViewRotation={value:new T.Matrix3()};
+
+    m.onBeforeCompile=shader=>{
+      Object.assign(shader.uniforms,{uMicroDiff,uMicroNormal,uMicroRough,uMicroAO,uViewRotation});
+      shader.vertexShader=shader.vertexShader.replace('#include <common>',
+        '#include <common>\nvarying vec3 vStoneWorldPos;\nvarying vec3 vStoneWorldNorm;'
+      ).replace('#include <begin_vertex>',
+        `#include <begin_vertex>
+         vStoneWorldPos=(modelMatrix*vec4(transformed,1.0)).xyz;
+         vec3 invScaleSq=1.0/vec3(dot(modelMatrix[0].xyz,modelMatrix[0].xyz),dot(modelMatrix[1].xyz,modelMatrix[1].xyz),dot(modelMatrix[2].xyz,modelMatrix[2].xyz));
+         vStoneWorldNorm=normalize(mat3(modelMatrix)*(normal*invScaleSq));`
+      );
+
+      shader.fragmentShader=
+        'varying vec3 vStoneWorldPos;\n'+
+        'varying vec3 vStoneWorldNorm;\n'+
+        'uniform sampler2D uMicroDiff;\n'+
+        'uniform sampler2D uMicroNormal;\n'+
+        'uniform sampler2D uMicroRough;\n'+
+        'uniform sampler2D uMicroAO;\n'+
+        'uniform mat3 uViewRotation;\n'+
+        shader.fragmentShader;
+
+      const triChunk=`
+        vec3 sNorm=normalize(vStoneWorldNorm);
+        if(!gl_FrontFacing)sNorm=-sNorm;
+        vec3 sWeights=pow(abs(sNorm),vec3(4.0));
+        sWeights/=max(0.0001,sWeights.x+sWeights.y+sWeights.z);
+        float slope=1.0-abs(sNorm.y);
+        float sFreq=14.0;
+        vec2 sUvY=vStoneWorldPos.xz*sFreq;
+        vec2 sUvX=vStoneWorldPos.zy*sFreq;
+        vec2 sUvZ=vStoneWorldPos.xy*sFreq;
+        vec3 mDiff=texture2D(uMicroDiff,sUvX).rgb*sWeights.x+texture2D(uMicroDiff,sUvY).rgb*sWeights.y+texture2D(uMicroDiff,sUvZ).rgb*sWeights.z;
+      `;
+
+      shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',
+        triChunk+
+        T.ShaderChunk.map_fragment.replace('diffuseColor *= sampledDiffuseColor;',
+          `diffuseColor *= sampledDiffuseColor;
+           vec3 grain=mDiff/vec3(0.658,0.609,0.550);
+           diffuseColor.rgb*=mix(vec3(1.0),grain,0.48);
+           float antiStretch=smoothstep(0.20,0.50,slope);
+           vec3 slopeDetail=diffuseColor.rgb*mix(vec3(1.0),grain,0.50);
+           diffuseColor.rgb=mix(diffuseColor.rgb,slopeDetail,antiStretch*0.75);`
+        )
+      );
+
+      shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_maps>',
+        T.ShaderChunk.normal_fragment_maps+`
+         vec3 mNY=texture2D(uMicroNormal,sUvY).xyz*2.0-1.0;
+         vec3 mNX=texture2D(uMicroNormal,sUvX).xyz*2.0-1.0;
+         vec3 mNZ=texture2D(uMicroNormal,sUvZ).xyz*2.0-1.0;
+         vec3 dNw=vec3(0.0,mNX.y,mNX.x)*sWeights.x+vec3(mNY.x,0.0,mNY.y)*sWeights.y+vec3(mNZ.x,mNZ.y,0.0)*sWeights.z;
+         float nStr=mix(0.55,1.15,smoothstep(0.18,0.48,slope));
+         normal=normalize(normal+(uViewRotation*dNw)*nStr);
+        `
+      );
+
+      shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>',
+        T.ShaderChunk.roughnessmap_fragment+`
+         float mRough=texture2D(uMicroRough,sUvX).g*sWeights.x+texture2D(uMicroRough,sUvY).g*sWeights.y+texture2D(uMicroRough,sUvZ).g*sWeights.z;
+         float rMod=mix(mRough,mRough*1.15,smoothstep(0.18,0.48,slope));
+         roughnessFactor=clamp(roughnessFactor*mix(0.80,1.25,rMod),0.18,0.96);
+        `
+      );
+
+      shader.fragmentShader=shader.fragmentShader.replace('#include <aomap_fragment>',
+        T.ShaderChunk.aomap_fragment+`
+         float mAO=texture2D(uMicroAO,sUvX).r*sWeights.x+texture2D(uMicroAO,sUvY).r*sWeights.y+texture2D(uMicroAO,sUvZ).r*sWeights.z;
+         reflectedLight.indirectDiffuse*=mix(1.0,mAO,0.40);
+        `
+      );
+    };
+    m.customProgramCacheKey=()=>'slab-detail-pbr-2';
    this.slab.geometry=g;this.slab.material=m;this.slab.scale.set(1.62/size.x,.50/size.y,1.28/size.z);this.slab.position.set(0,-.165,.83);this.slab.rotation.set(0,0,0);
-   this.slab.updateMatrixWorld(true);const down=new T.Raycaster();for(const [id,home]of Object.entries(this.home)){down.set(V(home.x,2,home.z),V(0,-1,0));const hit=down.intersectObject(this.slab)[0];if(hit)home.y=hit.point.y+(id==='pipe'?.032:id==='bag'?.02:.004);}
+   this.slab.onBeforeRender=(_renderer,_scene,camera)=>{uViewRotation.value.setFromMatrix4(camera.matrixWorldInverse);};
+   this.slab.updateMatrixWorld(true);const down=new T.Raycaster();const bagRestQ=new T.Quaternion().setFromEuler(new T.Euler(-1.453,-.0931,.9055));for(const [id,home]of Object.entries(this.home)){if(id==='bag'){let seat=null;for(const bx of[-.04,0,.04])for(const by of[.01,.05,.09,.12]){const lp=V(bx,by,-.017).applyQuaternion(bagRestQ);down.set(V(home.x+lp.x,2,home.z+lp.z),V(0,-1,0));const bhit=down.intersectObject(this.slab)[0];if(bhit)seat=Math.max(seat??-Infinity,bhit.point.y-lp.y);}if(seat!==null)home.y=seat-.004;continue;}down.set(V(home.x,2,home.z),V(0,-1,0));const hit=down.intersectObject(this.slab)[0];if(hit)home.y=hit.point.y+(id==='pipe'?.019:id==='lighter'?.016:id==='bottle'?.020:.001);}
    sources.forEach((s,index)=>{
     const geometry=(lods.get(s.name)??s).geometry.clone();geometry.computeBoundingBox();const bb=geometry.boundingBox,sz=bb.getSize(V()),c=bb.getCenter(V());geometry.translate(-c.x,-bb.min.y,-c.z);
     const material=s.material.clone();material.roughness=.87;
@@ -214,7 +337,7 @@ export class World {
    this.pipeGlass=mesh(lathe(pipeProfile,48),this.pipeMat,cap,V(0,0,0));this.pipeGlass.castShadow=false;
    mesh(new T.CylinderGeometry(.0074,.0074,.006,24),mat('#1a1d1e',.65),cap,V(0,.023,0));
    this.hotTip=mesh(new T.CylinderGeometry(.0055,.0055,.012,24),new T.MeshBasicMaterial({color:'#f24f20',transparent:true,opacity:0,depthWrite:false}),cap,V(0,-.015,0));this.hotTip.castShadow=false;
-   this.budMat=mat('#627344',.95);this.bowlBud=mesh(new T.IcosahedronGeometry(.0045,2),this.budMat,cap,V(0,.068,0));
+   this.budMat=createBudMaterial();this.bowlBud=mesh(createBudGeometry({seed:101,scale:0.68}),this.budMat,cap,V(0,.040,0));this.bagBudMat=createBudMaterial();
    this.emberLight=new T.PointLight('#ff752e',0,.25,2);cap.add(this.emberLight);this.emberLight.position.set(0,.074,0);
    const lighter=new T.Group();this.scene.add(lighter);this.items.lighter=lighter;const lighterBody=mat('#111413',.31);
    mesh(new T.CylinderGeometry(.015,.015,.073,40),lighterBody,lighter,V(0,.038,0));
@@ -242,14 +365,12 @@ export class World {
    this.flameCore=mesh(new T.SphereGeometry(1,12,12),new T.MeshBasicMaterial({color:'#b6e3ff',transparent:true,opacity:.8}),lighter,V(.005,.102,0));this.flameCore.scale.set(.002,.005,.002);this.flameCore.castShadow=false;
    this.flameLight=new T.PointLight('#ffb35a',0,.65,2);lighter.add(this.flameLight);this.flameLight.position.set(0,.11,0);
    const bag=new T.Group();this.scene.add(bag);this.items.bag=bag;
-   const bagMat=new T.MeshPhysicalMaterial({color:'#e5eee2',roughness:.22,transmission:.82,thickness:.0012,transparent:true,opacity:.48,side:T.DoubleSide,depthWrite:false,envMapIntensity:.85});
-   const bagGeo=new T.BoxGeometry(.12,.14,.014,12,12,1);const bp=bagGeo.attributes.position;for(let i=0;i<bp.count;i++){let x=bp.getX(i),y=bp.getY(i);bp.setZ(i,bp.getZ(i)+Math.sin(x*140+y*80)*.0028+Math.cos(x*60-y*110)*.0015);};bagGeo.computeVertexNormals();mesh(bagGeo,bagMat,bag,V(0,.07,0));mesh(new T.BoxGeometry(.12,.0035,.018),mat('#5d8c6b',.42),bag,V(0,.125,0));
-   this.bagNugs=[];const nugGeo=mergeVertices(new T.IcosahedronGeometry(.008,3)),np=nugGeo.attributes.position,nc=[];for(let i=0;i<np.count;i++){const x=np.getX(i),y=np.getY(i),z=np.getZ(i),detail=Math.sin(x*3900+y*1830)*Math.cos(z*2870+y*2950),f=.84+detail*.16;np.setXYZ(i,x*f,y*f,z*f);const c=new T.Color().setHSL(detail>.72?.09:.24,.38+detail*.15,.16+(detail+1)*.09);nc.push(c.r,c.g,c.b);}nugGeo.setAttribute('color',new T.Float32BufferAttribute(nc,3));nugGeo.computeVertexNormals();for(let i=0;i<35;i++){const nug=mesh(nugGeo,mat('#ffffff',.92,{vertexColors:true}),bag,V(rand(-.046,.046),rand(.018,.09),rand(-.004,.003)));nug.scale.set(rand(.7,1.3),rand(.9,1.7),rand(.6,.9));this.bagNugs.push(nug);}
-   this.trash=new T.Group();this.scene.add(this.trash);this.trash.position.set(.7,.0,.45);const sack=mesh(new T.SphereGeometry(.24,32,24),mat('#192321',.36),this.trash,V(0,.17,0));sack.scale.set(1,.9,.85);const top=mesh(new T.TorusGeometry(.12,.045,12,32),mat('#29322c',.4),this.trash,V(0,.32,0));top.rotation.x=Math.PI/2;for(let i=0;i<36;i++){const n=mesh(nugGeo,this.budMat,this.trash,V(rand(-.095,.095),.30+rand(0,.06),rand(-.07,.07)));n.scale.setScalar(2.4);}this.trash.visible=false;
+   const weedBag=createWeedBag(this.bagBudMat);bag.add(weedBag.group);this.bagFilm=weedBag.film;this.bagNugs=weedBag.contents;this.bagGeos=weedBag.geometries;
+   this.trash=new T.Group();this.scene.add(this.trash);this.trash.position.set(.7,.0,.45);const sack=mesh(new T.SphereGeometry(.24,32,24),mat('#192321',.36),this.trash,V(0,.17,0));sack.scale.set(1,.9,.85);const top=mesh(new T.TorusGeometry(.12,.045,12,32),mat('#29322c',.4),this.trash,V(0,.32,0));top.rotation.x=Math.PI/2;for(let i=0;i<36;i++){const n=mesh(this.bagGeos[i%this.bagGeos.length],this.bagBudMat,this.trash,V(rand(-.095,.095),.30+rand(0,.06),rand(-.07,.07)));n.scale.setScalar(2.4);}this.trash.visible=false;
    const outlet=mesh(new T.CircleGeometry(.0025,16),mat('#161b12',.8,{side:T.DoubleSide}),bottle,V(.0326,.032,0));outlet.rotation.y=Math.PI*.43;this.outlet=outlet;
    this.jet=mesh(new T.CylinderGeometry(.0014,.0021,1,8),new T.MeshPhysicalMaterial({color:'#d9f3ea',transparent:true,opacity:.55,roughness:.15,metalness:.25}),this.scene);this.jet.castShadow=false;
-   this.home={bottle:V(-.04,.293,.84),pipe:V(-.31,.323,.87),lighter:V(.28,.31,.79),bag:V(.41,.32,1.05)};
-   for(const [id,g]of Object.entries(this.items)){g.userData.item=id;g.position.copy(this.home[id]);g.traverse(o=>{o.userData.item=id;if(o.isMesh)this.interactive.push(o);});}this.items.bag.rotation.set(-1.25,0,-.2);this.items.lighter.rotation.z=-.25;
+   this.home={bottle:V(-.2272,.293,.7578),pipe:V(-.201,.323,.986),lighter:V(-.10,.31,.92),bag:V(.287,.32,1.084)};
+   for(const [id,g]of Object.entries(this.items)){g.userData.item=id;g.position.copy(this.home[id]);g.traverse(o=>{o.userData.item=id;if(o.isMesh)this.interactive.push(o);});}this.items.bottle.rotation.set(-1.7768,.1651,.7989);this.items.bag.rotation.set(-1.453,-.0931,.9055);this.items.lighter.rotation.set(1.5708,0,0);
    this.trash.traverse(o=>{o.userData.item='bag';if(o.isMesh)this.interactive.push(o);});
   }
   makeParticles(){
@@ -322,7 +443,8 @@ export class World {
     }
 
    this.heroProps?.update(sim);
-   const flameOn=(input.fire&&['heat','hole','ignite'].includes(sim.mode))||sim.mode==='auto';this.flame.visible=this.flameCore.visible=flameOn&&sim.angle<85&&sim.angle>-75;
+   const lighterAlone=sim.held==='lighter'&&!sim.supporting;
+   const flameOn=(input.fire&&(lighterAlone||['heat','hole','ignite'].includes(sim.mode)))||sim.mode==='auto';this.flame.visible=this.flameCore.visible=flameOn&&sim.angle<85&&sim.angle>-75;
    const flicker=.93+Math.sin(this.time*52)*.045+Math.sin(this.time*83)*.03;this.flameLight.intensity=flameOn?.018*flicker:0;this.emberLight.intensity=sim.embers*.008;if(flameOn&&!this.wasFlame)this.wheel.rotation.x+=1.4;this.wasFlame=flameOn;if(this.flameShader){this.flame.material.uniforms.time.value=this.time;this.flameCore.visible=false;this.flame.scale.set(1,flicker,1);}else this.flame.scale.y=(.007+.012*(sim.flameQuality||.3))*flicker;
    this.items.bag.visible=!sim.upgraded;this.trash.visible=sim.upgraded;for(let i=0;i<this.bagNugs.length;i++)this.bagNugs[i].visible=i<sim.stock*3.5;
    this.jet.visible=sim.flow>0&&['free','inhale'].includes(sim.phase)&&sim.mode!=='fill';
