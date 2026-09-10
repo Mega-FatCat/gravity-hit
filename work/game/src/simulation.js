@@ -11,7 +11,7 @@ export class Simulation {
  // Exchanging tools puts any object that no longer fits either hand onto the slab.
  select(id){
   if(!['bottle','pipe','lighter','bag'].includes(id))return false;
-  const companions=id==='bottle'||id==='bag'?['pipe']:['bottle','pipe'];
+  const companions=id==='pipe'?['bag','bottle']:id==='bottle'||id==='bag'?['pipe']:['bottle','pipe'];
   const support=companions.find(item=>item!==id&&this.isHeld(item)&&!(item==='pipe'&&this.cap&&this.prep>0));
   this.held=id;this.supporting=support||null;this.mode='idle';
   if(!this.picked.includes(id))this.picked.push(id);
@@ -52,7 +52,9 @@ export class Simulation {
   if(id==='bag'||id==='pack'||id==='pipe'){
    if(id==='pipe'&&this.cap)return this.say('The pipe is attached. Unscrew the cap with A first.');
    if(id==='pipe'&&this.isHeld('bottle')&&!this.cap&&this.prep>0){
-    this.select('bottle');this.mode='screw';this.progress=0;
+    this.held='bottle';this.supporting='pipe';this.mode='screw';this.progress=0;
+    if(!this.picked.includes('pipe'))this.picked.push('pipe');
+    if(!this.picked.includes('bottle'))this.picked.push('bottle');
     this.say('Hold LMB or D to screw the cap onto the bottle.');
     if(this.upgraded)this.setCap(true);
     return true;
@@ -75,8 +77,17 @@ export class Simulation {
    return true;
   }
   if(id==='bottle'){
-   const selected=this.held==='bottle';this.select('bottle');
-   if(!selected)return true;
+   const wasPipe=this.held==='pipe',selected=this.held==='bottle';this.select('bottle');
+   if(!selected){
+    if(wasPipe&&!this.cap&&this.prep>0){
+     this.mode='screw';this.progress=0;
+     if(!this.picked.includes('pipe'))this.picked.push('pipe');
+     if(!this.picked.includes('bottle'))this.picked.push('bottle');
+     this.say('Hold LMB or D to screw the cap onto the bottle.');
+     if(this.upgraded)this.setCap(true);
+    }
+    return true;
+   }
    this.mode=this.cap?'uncap':'screw';this.progress=this.cap?1:0;
    this.say(this.cap?'Hold LMB or A to unscrew the cap.':'Hold LMB or D to screw the cap on.');
    if(this.upgraded)this.setCap(!this.cap);
@@ -186,7 +197,7 @@ export class Simulation {
   this.angle=clamp(Number.isFinite(this.angle)?this.angle:0,-100,100);
   this.picked=Array.isArray(this.picked)?[...new Set(this.picked.filter(id=>['bottle','pipe','lighter','bag'].includes(id)))]:[];
   if(!['bottle','pipe','lighter','bag'].includes(this.held))this.held=null;
-  if(!['bottle','pipe'].includes(this.supporting)||this.supporting===this.held)this.supporting=null;
+  if(!['bottle','pipe','bag'].includes(this.supporting)||this.supporting===this.held)this.supporting=null;
   if(this.cap&&this.prep>0){if(this.held==='pipe')this.held=null;if(this.supporting==='pipe')this.supporting=null;}
  }
  snapshot(){

@@ -88,7 +88,7 @@ export class World {
    (async()=>{const model=await gl.loadAsync('./assets/shrub_04_lod.glb');this.makeShrubs(model.scene);})(),
    (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/grass_clumps_lod.glb'),gl.loadAsync('./assets/grass_far_lod.glb')]);plantGrass(this,model.scene,lod.scene);})(),
    (async()=>{try{const model=await gl.loadAsync('./assets/pine.glb');this.makePines(model.scene);}catch(e){console.warn('Pine LOD unavailable',e.message);}})()
-  ];const result=await Promise.allSettled(tasks);this.assetErrors=result.filter(r=>r.status==='rejected').map(r=>String(r.reason));if(this.assetErrors.length)console.error(this.assetErrors);upgradeHeroProps(this);this.renderer.compile(this.scene,this.camera);return this;
+  ];const result=await Promise.allSettled(tasks);this.assetErrors=result.filter(r=>r.status==='rejected').map(r=>String(r.reason));if(this.assetErrors.length)console.error(this.assetErrors);upgradeHeroProps(this);this.renderer.compile(this.scene,this.camera);this._shadowState=null;this.renderer.shadowMap.needsUpdate=true;return this;
  }
  makeGround(){buildForestFloor(this);}
  streamX(z){return creekX(z);}
@@ -266,6 +266,7 @@ export class World {
    this.renderer.shadowMap.enabled=value!=='low';
    this.renderer.shadowMap.autoUpdate=value==='high';
    this.renderer.shadowMap.needsUpdate=true;
+   this._shadowState=null;
    this.renderer.setSize(innerWidth,innerHeight);
   }
   resize(){this.camera.aspect=innerWidth/innerHeight;this.camera.updateProjectionMatrix();this.renderer.setSize(innerWidth,innerHeight);}
@@ -341,7 +342,51 @@ export class World {
    this.scene.updateMatrixWorld(true);
 
   }
- render(){this.renderer.shadowMap.needsUpdate=true;this.renderer.render(this.scene,this.camera);}
+  checkShadowUpdate(){
+   const sm=this.renderer.shadowMap;
+   if(!sm.enabled||sm.autoUpdate)return;
+   if(sm.needsUpdate)return;
+   const sun=this.sun;
+   const items=[this.items?.lighter,this.wheel,this.items?.bottle,this.items?.pipe,this.items?.bag,this.trash].filter(Boolean);
+   let dirty=!this._shadowState;
+   if(!dirty){
+    const s=this._shadowState;
+    if(s.sx!==sun.position.x||s.sy!==sun.position.y||s.sz!==sun.position.z||s.si!==sun.intensity||s.sc!==sun.color.getHex()){
+     dirty=true;
+    }else{
+     for(let i=0;i<items.length;i++){
+      const item=items[i],cached=s.items[i];
+      if(!cached||cached.v!==item.visible){dirty=true;break;}
+      const m=item.matrixWorld.elements,cm=cached.m;
+      for(let j=0;j<16;j++){
+       if(Math.abs(m[j]-cm[j])>1e-5){dirty=true;break;}
+      }
+      if(dirty)break;
+     }
+    }
+   }
+   if(dirty){
+    sm.needsUpdate=true;
+    if(!this._shadowState){
+     this._shadowState={
+      sx:sun.position.x,sy:sun.position.y,sz:sun.position.z,si:sun.intensity,sc:sun.color.getHex(),
+      items:items.map(it=>({v:it.visible,m:new Float32Array(it.matrixWorld.elements)}))
+     };
+    }else{
+     const s=this._shadowState;
+     s.sx=sun.position.x;s.sy=sun.position.y;s.sz=sun.position.z;s.si=sun.intensity;s.sc=sun.color.getHex();
+     if(s.items.length!==items.length){
+      s.items=items.map(it=>({v:it.visible,m:new Float32Array(it.matrixWorld.elements)}));
+     }else{
+      for(let i=0;i<items.length;i++){
+       s.items[i].v=items[i].visible;
+       s.items[i].m.set(items[i].matrixWorld.elements);
+      }
+     }
+    }
+   }
+  }
+  render(){this.checkShadowUpdate();this.renderer.render(this.scene,this.camera);}
  async enablePathTracing(){
   if(this.pathTracer)return;
   const {WebGLPathTracer}=await import('three-gpu-pathtracer');

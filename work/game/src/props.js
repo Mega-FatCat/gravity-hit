@@ -32,39 +32,58 @@ diffuseColor.a=mix(${face.toFixed(3)},${edge.toFixed(3)},shellGrazing);
  };
  material.customProgramCacheKey=()=>`thin-shell-${face}-${edge}`;
 }
+function borosilicateResponse(material){
+ // Keep the broad face optically clear while giving the very thin wall a
+ // restrained grazing-angle highlight. This is surface readability, not a
+ // frosted alpha treatment, so the forest remains visible through the pipe.
+ material.onBeforeCompile=shader=>{
+  shader.fragmentShader=shader.fragmentShader.replace('#include <opaque_fragment>',`
+float pipeGrazing=pow(1.-abs(dot(normalize(normal),normalize(vViewPosition))),1.9);
+float pipeLuma=dot(outgoingLight,vec3(.2126,.7152,.0722));
+vec3 pipeEdgeTone=vec3(mix(.76,.24,smoothstep(.38,.62,pipeLuma)));
+outgoingLight=mix(outgoingLight,pipeEdgeTone,pipeGrazing*.24);
+#include <opaque_fragment>`);
+ };
+ material.customProgramCacheKey=()=>`borosilicate-edge-v4`;
+}
 
 function rebuildPipe(world){
  const pipe=world.items.pipe,capMaterial=world.capmesh.material;
  const keep=new Set([world.hotTip,world.bowlBud,world.emberLight]);
  for(const part of pipe.children)if(part.material===capMaterial)keep.add(part);
  removeTree(world,pipe,keep);
- // Slim glass one-hitter matching the supplied reference photograph: a long
- // narrow borosilicate tube (~8 cm) with a subtle mouthpiece lip, a gentle
- // pinch restriction, and a modest fire-polished bowl. Much smaller than the
- // previous oversized 11.6 cm pipe.
+ // Slim straight one-hitter/downstem matching the supplied reference: the
+ // narrow stem passes through the cap, the shallow flared bowl stays above it,
+ // and the opposite end has only a small fire-polished mouthpiece lip. Keep
+ // the profile explicit rather than relying on a scaled rod so the rim and
+ // wall read correctly in close views.
  const profile=[
-  [.00335,-.038],[.00365,-.0375],[.00380,-.036],
-  [.00380,-.028],[.00382,-.010],[.00384,.010],[.00386,.020],
-  [.00392,.025],[.00420,.029],[.00445,.032],[.00458,.035],
-  [.00455,.037],[.00440,.0385],[.00420,.039],[.00400,.0385],
-  [.00385,.037],[.00370,.035],[.00350,.032],[.00340,.029],
-  [.00300,.026],[.00220,.024],[.00175,.023],[.00210,.021],
-  [.00290,.018],[.00292,.010],[.00290,-.010],[.00290,-.028],
-  [.00290,-.036],[.00310,-.0376],[.00335,-.038]
+  // outer wall: short mouthpiece flare, straight narrow body, shallow bowl
+  [.00345,-.0490],[.00388,-.0487],[.00405,-.0478],[.00405,-.0462],
+  [.00366,-.0448],[.00334,-.0427],[.00334,-.0340],[.00335,-.0100],
+  [.00336,.0150],[.00340,.0220],[.00356,.0250],[.00390,.0280],
+  [.00435,.0320],[.00485,.0360],[.00525,.0400],[.00545,.0430],
+  [.00546,.0450],[.00530,.0465],[.00505,.0475],
+  // inner wall: visible rim, bowl cavity and continuous bore
+  [.00466,.0470],[.00435,.0457],[.00405,.0435],[.00365,.0400],
+  [.00320,.0360],[.00295,.0320],[.00275,.0290],[.00275,.0240],
+  [.00272,.0170],[.00272,-.0100],[.00272,-.0330],[.00274,-.0430],
+  [.00300,-.0490],[.00345,-.0490]
  ];
- const glass=new T.MeshPhysicalMaterial({color:'#f6fff9',roughness:.035,metalness:0,transmission:1,thickness:.0012,ior:1.474,transparent:false,opacity:1,depthWrite:true,side:T.FrontSide,envMapIntensity:1.4,clearcoat:.3,clearcoatRoughness:.075});
- world.pipeMat=glass;world.pipeGlass=add(pipe,'Slim borosilicate one-hitter',lathe(profile,96,true),glass);world.pipeGlass.renderOrder=5;
+ const glass=new T.MeshPhysicalMaterial({color:'#f4fbf7',roughness:.05,metalness:0,transmission:1,thickness:.0007,ior:1.474,transparent:false,opacity:1,depthWrite:false,side:T.DoubleSide,envMapIntensity:1.8,clearcoat:.45,clearcoatRoughness:.06});
+ borosilicateResponse(glass);
+ world.pipeMat=glass;world.pipeGlass=add(pipe,'Slim borosilicate one-hitter',lathe(profile,96),glass);world.pipeGlass.renderOrder=5;
  // Cap aperture sized down for the slimmer stem.
- world.capmesh.geometry.dispose();world.capmesh.geometry=lathe([[.00410,.006],[.0125,.006],[.0132,.005],[.0132,-.006],[.0128,-.007],[.0122,-.007],[.0122,.004],[.00410,.004],[.00410,.006]],80);
+ world.capmesh.geometry.dispose();world.capmesh.geometry=lathe([[.00370,.006],[.0125,.006],[.0132,.005],[.0132,-.006],[.0128,-.007],[.0122,-.007],[.0122,.004],[.00370,.004],[.00370,.006]],80);
  capMaterial.color.set('#365546');capMaterial.roughness=.5;
- world.pipeGrommet=add(pipe,'Cap aperture seal',lathe([[.00385,.005],[.00470,.005],[.00500,.006],[.00510,.007],[.00490,.008],[.00390,.008],[.00385,.005]],64,true),new T.MeshStandardMaterial({color:'#262b27',roughness:.7}));
+ world.pipeGrommet=add(pipe,'Cap aperture seal',lathe([[.00315,.005],[.00445,.005],[.00475,.006],[.00478,.007],[.00460,.008],[.00328,.008],[.00315,.005]],64,true),new T.MeshStandardMaterial({color:'#262b27',roughness:.7}));
  // Localized residue on the interior, scaled to the new bore.
  const residueMaterial=new T.MeshStandardMaterial({color:'#462a10',roughness:.47,transparent:true,opacity:0,depthWrite:false,side:T.DoubleSide});
  const residue=add(pipe,'Inner amber residue',lathe([[.00282,-.034],[.00284,.015],[.00180,.021],[.00140,.023],[.00180,.026],[.00380,.030],[.00430,.034],[.00445,.037]],64),residueMaterial);residue.renderOrder=4;residue.userData.pickable=false;
  world.pipeResidue=residue;
- world.hotTip.geometry.dispose();world.hotTip.geometry=lathe([[.00390,-.006],[.00410,-.005],[.00410,.002],[.00390,.004]],48);world.hotTip.position.set(0,-.033,0);world.hotTip.userData.pickable=false;
- world.bowlBud.position.set(0,.034,0);world.bowlBud.scale.set(1.0,.65,1.0);world.bowlBud.userData.pickable=false;
- world.emberLight.position.set(0,.036,0);
+ world.hotTip.geometry.dispose();world.hotTip.geometry=lathe([[.00315,-.004],[.00355,-.004],[.00355,.003],[.00315,.003]],48);world.hotTip.position.set(0,-.044,0);world.hotTip.userData.pickable=false;
+ world.bowlBud.position.set(0,.040,0);world.bowlBud.scale.set(1.0,.65,1.0);world.bowlBud.userData.pickable=false;
+ world.emberLight.position.set(0,.042,0);
  mark(world,pipe,'pipe');
  world.heroProps.pipe=world.pipeGlass;
 }
@@ -169,10 +188,10 @@ function correctLighter(world){
 export function upgradeHeroProps(world){
  world.heroProps={};rebuildPipe(world);rebuildBottle(world);correctLighter(world);
  world.bottleSmoke.material.uniforms.uWaterPlane.value=world.liquid.localWaterPlane;
- world.heroAnchors={pipeTip:V(0,-.038,0),bowl:V(0,.036,0),bottleMouth:V(0,.226,0),outlet:V(.0326,.032,0),nozzle:world.nozzle.clone()};
+ world.heroAnchors={pipeTip:V(0,-.049,0),bowl:V(0,.045,0),bottleMouth:V(0,.226,0),outlet:V(.0326,.032,0),nozzle:world.nozzle.clone()};
  world.heroProps.update=sim=>{
   world.pipeGrommet.visible=sim.prep>0;
   world.pipeResidue.material.opacity=Math.min(.72,sim.residue*.78);world.pipeResidue.visible=sim.residue>.005;
-  world.pipeMat.color.setRGB(1-sim.residue*.08,1-sim.residue*.12,1-sim.residue*.17);world.pipeMat.roughness=.035+sim.residue*.065;
+  world.pipeMat.color.setRGB(1-sim.residue*.08,1-sim.residue*.12,1-sim.residue*.17);world.pipeMat.roughness=.05+sim.residue*.065;
  };
 }

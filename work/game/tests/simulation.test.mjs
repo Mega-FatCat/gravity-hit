@@ -26,6 +26,39 @@ test('selecting one object never acquires unrelated objects from the slab',()=>{
  const s=new Simulation();s.action('lighter');assert.equal(s.supporting,null);s.cancel();s.action('pipe');assert.equal(s.supporting,null);
  s.action('lighter');assert.equal(s.supporting,'pipe');
 });
+test('pipe and weed bag acquisition is order-independent and retains both objects',()=>{
+ for(const order of [['pipe','bag'],['bag','pipe']]){
+  const s=ready();
+  s.action(order[0]);
+  assert.equal(s.held,order[0]);assert.equal(s.supporting,null);
+  s.action(order[1]);
+  assert.equal(s.mode,'pack');assert.equal(s.held,order[1]);assert.equal(s.supporting,order[0]);
+  assert.equal(s.isHeld('pipe'),true);assert.equal(s.isHeld('bag'),true);
+  assert.equal(s.isHeld('bottle'),false);assert.equal(s.isHeld('lighter'),false);
+  s.step(0);assert.equal(s.isHeld('pipe'),true);assert.equal(s.isHeld('bag'),true);
+  s.action(order[1]);s.action(order[0]);
+  assert.equal(s.mode,'pack');assert.equal(s.isHeld('pipe'),true);assert.equal(s.isHeld('bag'),true);
+  s.step(0);assert.equal(s.isHeld('pipe'),true);assert.equal(s.isHeld('bag'),true);
+  s.cancel();assert.equal(s.held,null);assert.equal(s.supporting,null);
+ }
+});
+test('pipe and bottle screw acquisition is order-independent and converges to same state',()=>{
+ for(const order of [['pipe','bottle'],['bottle','pipe']]){
+  const s=ready({water:1,bud:1});
+  s.action(order[0]);
+  assert.equal(s.held,order[0]);assert.equal(s.supporting,null);
+  s.action(order[1]);
+  assert.equal(s.mode,'screw');assert.equal(s.held,'bottle');assert.equal(s.supporting,'pipe');
+  assert.equal(s.progress,0);assert.equal(s.cap,false);
+  assert.equal(s.isHeld('bottle'),true);assert.equal(s.isHeld('pipe'),true);
+  advance(s,.5,{right:true});
+  assert.ok(s.progress>0);assert.ok(s.progress<1);assert.equal(s.mode,'screw');
+  advance(s,1,{left:true});
+  assert.equal(s.progress,0);assert.equal(s.cap,false);
+  advance(s,2.5,{right:true});
+  assert.equal(s.progress,1);assert.equal(s.cap,true);assert.equal(s.mode,'idle');
+ }
+});
 test('fill targets the stream and retains the already held bottle',()=>{
  const s=ready();s.action('stream');assert.notEqual(s.mode,'fill');s.action('bottle');assert.equal(s.water,0);assert.equal(s.mode,'idle');
  s.action('stream');advance(s,4,{fire:true,aim:1,seal:true});assert.ok(s.water>.99);assert.equal(s.held,'bottle');assert.equal(s.mode,'idle');

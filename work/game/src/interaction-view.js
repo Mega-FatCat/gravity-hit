@@ -52,7 +52,7 @@ export function prepareInteractionFrame(world,dt,sim,input,settings){
  if((sim.cap&&sim.prep>0)||assembling){
   pParent=bottle;p=v(0,.226,0);pq=q();pKey='attached';
   if(assembling){
-   const lift=sim.mode==='press'?(1-sim.progress)*.065:(1-sim.progress)*.026;
+   const lift=(1-sim.progress)*.065;
    p.y+=lift;pq=q(0,sim.mode==='press'?0:sim.progress*Math.PI*6,0);
   }
  }else if(held('pipe')){
@@ -87,7 +87,7 @@ export function prepareInteractionFrame(world,dt,sim,input,settings){
  }
  world.scene.updateMatrixWorld(true);
  world.aimScreen=world.screen(world.target);
- const anchors={bottle:v(0,.226,0),pipe:v(0,.036,0),lighter:world.nozzle||v(0,.08,0),bag:v(0,.14,0)};
+ const anchors={bottle:v(0,.226,0),pipe:v(0,.045,0),lighter:world.nozzle||v(0,.08,0),bag:v(0,.14,0)};
  for(const [id,object]of Object.entries(world.items))world.projected[id]=world.screen(object.localToWorld(anchors[id].clone()));
  if(sim.upgraded)world.projected.bag=world.screen(world.trash.localToWorld(v(0,.36,0)));
  world.projected.stream=world.screen(v(world.streamX(.75),-.06,.75));

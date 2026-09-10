@@ -204,17 +204,43 @@ function pineSprays(source,height){
  const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));g.setIndex(indices);g.computeVertexNormals();return g;
 }
 export function plantPines(world,model,distant=false){
- const box=new T.Box3().setFromObject(model),height=box.getSize(new T.Vector3()).y,sources=sourceMeshes(model),r=random(distant?81500:71032),placements=[];
- for(let tries=0;tries<5000&&placements.length<(distant?190:90);tries++){
+ const box=new T.Box3().setFromObject(model),height=box.getSize(new T.Vector3()).y,sources=sourceMeshes(model),r=random(distant?81500:71032);
+ const canopyPlacements=[],trunkPlacements=[];
+ const deadWood=[[2.3,-1.5],[-3.6,2.8],[4.7,4.0],[-5.0,-5.4],[1.6,-7.8],[1.8,-.95],[4.2,3.8],[-4.7,-3.9]];
+ for(let tries=0;tries<5000&&canopyPlacements.length<(distant?190:90);tries++){
    const a=r()*TAU,dist=distant?25+Math.sqrt(r())*43:4.5+Math.sqrt(r())*24,x=Math.cos(a)*dist,z=Math.sin(a)*dist+.8;
-   if(Math.abs(x-creekX(z))<creekWidth(z)*.5+.65||placements.some(p=>Math.hypot(x-p.x,z-p.z)<(dist<18?2.3:3.2)))continue;
-   const h=dist<13?11+r()*7:14+r()*10,s=h/height,width=s*(.48+r()*.27);
-   placements.push({x,z,y:forestHeight(x,z)-.055,sx:width,sy:s,sz:width,rot:r()*TAU,rx:(r()-.5)*.03,rz:(r()-.5)*.035,tint:.83+r()*.17});
+   if(Math.abs(x-creekX(z))<creekWidth(z)*.5+.80||Math.hypot(x,z-2.65)<3.0||deadWood.some(([sx,sz])=>Math.hypot(x-sx,z-sz)<1.5)||canopyPlacements.some(p=>Math.hypot(x-p.x,z-p.z)<(dist<18?2.5:3.2)))continue;
+   const roll=r();
+   let h,trunkRatio,crownWidthRatio,tint;
+   if(distant){
+    if(roll<.22){h=12.5+r()*4;trunkRatio=.72+r()*.26;crownWidthRatio=.38+r()*.12;tint=.88+r()*.12;}
+    else if(roll<.65){h=15.5+r()*5;trunkRatio=1.20+r()*.35;crownWidthRatio=.46+r()*.16;tint=.82+r()*.14;}
+    else if(roll<.88){h=18.5+r()*6;trunkRatio=1.70+r()*.40;crownWidthRatio=.54+r()*.18;tint=.76+r()*.12;}
+    else{h=21.5+r()*6;trunkRatio=2.30+r()*.55;crownWidthRatio=.62+r()*.20;tint=.70+r()*.12;}
+   }else{
+    if(roll<.22){h=(dist<13?10.5:12.0)+r()*3;trunkRatio=.70+r()*.28;crownWidthRatio=.36+r()*.12;tint=.88+r()*.12;}
+    else if(roll<.65){h=(dist<13?12.5:14.5)+r()*4;trunkRatio=1.20+r()*.35;crownWidthRatio=.46+r()*.16;tint=.82+r()*.14;}
+    else if(roll<.88){h=16.0+r()*6;trunkRatio=1.70+r()*.40;crownWidthRatio=.54+r()*.18;tint=.76+r()*.12;}
+    else{h=17.5+r()*5.5;trunkRatio=2.35+r()*.55;crownWidthRatio=.62+r()*.20;tint=.70+r()*.12;}
+   }
+   const s=h/height,width=s*crownWidthRatio,trunkBase=s*trunkRatio;
+   const aspect=1+(r()-.5)*.16,trunkSx=trunkBase*aspect,trunkSz=trunkBase/aspect;
+   const embed=.045+trunkBase*.018;
+   const baseProps={x,z,y:forestHeight(x,z)-embed,sy:s,rot:r()*TAU,rx:(r()-.5)*.03,rz:(r()-.5)*.035,tint};
+   canopyPlacements.push({...baseProps,sx:width,sz:width});
+   trunkPlacements.push({...baseProps,sx:trunkSx,sz:trunkSz});
   }
-  for(const src of sources){const twig=src.material.name.includes('twig'),g=twig?pineSprays(src,height):src.geometry.clone();g.translate(0,-box.min.y,0);const m=scanMaterial(src.material,world,0);m.color.setRGB(1,1,1);if(twig){m.roughness=1;m.alphaTest=.30;}
-   instances(world,g,m,placements,(distant?'Distant pine ':'Mature pine ')+src.material.name,!distant);
+  for(const src of sources){
+   const isTrunk=src.material.name.includes('trunk')||src.material.name.includes('dead_branches');
+   const isTwig=src.material.name.includes('twig');
+   const g=isTwig?pineSprays(src,height):src.geometry.clone();
+   g.translate(0,-box.min.y,0);
+   const m=scanMaterial(src.material,world,0);
+   m.color.setRGB(1,1,1);
+   if(isTwig){m.roughness=1;m.alphaTest=.30;}
+   instances(world,g,m,isTrunk?trunkPlacements:canopyPlacements,(distant?'Distant pine ':'Mature pine ')+src.material.name,!distant);
   }
-  world.environmentCounts??={};world.environmentCounts[distant?'Distant pines':'Mature pines']=placements.length;
+  world.environmentCounts??={};world.environmentCounts[distant?'Distant pines':'Mature pines']=canopyPlacements.length;
  }
 
 export async function loadForestDetails(world,gl,texture){
