@@ -336,33 +336,70 @@ export class World {
        else if(k===20)refillBankHeroBMatrices.push(d.matrix.clone());
        else (crossesCreekLip(x,z,targetSize)?streamMatrices:landMatrices).push(d.matrix.clone());
       }
-     const makeBatch=(matrices,useLod,label,sourceOverride=null,heroBank=false,heroColor='#73716a')=>{
+     const makeBatch=(matrices,useLod,label,sourceOverride=null,creekPbr=false,heroBank=false,heroColor='#73716a')=>{
       if(!matrices.length)return;
       const sourceMesh=sourceOverride??((useLod?lods.get(s.name):null)??s);
       const geometry=sourceMesh.geometry.clone();geometry.computeBoundingBox();
       const rawSize=geometry.boundingBox.getSize(V());
-      // Match the previous LOD's extents before translating the full scan;
-      // only vertex density/detail changes, never the authored footprint.
-      geometry.scale(lodReferenceSize.x/rawSize.x,lodReferenceSize.y/rawSize.y,lodReferenceSize.z/rawSize.z);
+      // Every creek-facing high-detail rock preserves the source scan's true
+      // geological aspect ratio. Fit its horizontal maximum to the old authored
+      // footprint, while leaving the full-resolution silhouette unwarped.
+      if(creekPbr){
+       const rawMax=Math.max(rawSize.x,rawSize.z);
+       const uniformFit=lodReferenceMax/Math.max(.0001,rawMax);
+       geometry.scale(uniformFit,uniformFit,uniformFit);
+      }else{
+       // Preserve established dimensions for all unrelated authored rocks.
+       geometry.scale(lodReferenceSize.x/rawSize.x,lodReferenceSize.y/rawSize.y,lodReferenceSize.z/rawSize.z);
+      }
       geometry.computeBoundingBox();const bb=geometry.boundingBox,c=bb.getCenter(V());geometry.translate(-c.x,-bb.min.y,-c.z);
       // Both batches share the same 4K photogrammetry material family as the
       // ritual slab; only the creek-crossing batch gets the full mesh source.
       const material=m.clone();material.roughness=.88;
-      if(heroBank){
-       material.color.set(heroColor);
-       material.normalScale.set(1.72,1.72);
-       material.roughness=.82;
-       material.envMapIntensity=.90;
+      if(creekPbr){
+       if(heroBank)material.color.set(heroColor);
+       material.normalScale.set(heroBank?1.82:1.58,heroBank?1.82:1.58);
+       material.roughness=heroBank ? .84 : .86;
+       material.envMapIntensity=heroBank ? .84 : .86;
+       const baseCompile=material.onBeforeCompile;
+       material.onBeforeCompile=shader=>{
+        baseCompile(shader);
+        // The old stream-air correction collapsed bright full-resolution scans
+        // into a nearly uniform beige cap. Creek PBR batches retain the scan's
+        // actual albedo/micro-normal contrast on dry facets; only a very small
+        // weathering restraint remains to avoid chalk-white clipping.
+        shader.fragmentShader=shader.fragmentShader
+         .replace('streamAir*paleAir*0.94','streamAir*paleAir*0.10')
+         .replace('streamAirOutput*paleOutput*0.64','streamAirOutput*paleOutput*0.08');
+        // Smooth roughness and color continuously through the waterline. The
+        // dry side is left on the same 4K scan + triplanar micro-detail path as
+        // the ritual slab rather than being replaced with a synthetic dry cap.
+        shader.fragmentShader=shader.fragmentShader.replace(
+         'roughnessFactor=clamp(roughnessFactor*mix(0.80,1.25,rMod),0.18,0.96);',
+         `roughnessFactor=clamp(roughnessFactor*mix(0.80,1.25,rMod),0.18,0.96);
+          float creekRoughWet=smoothstep(-0.018,0.026,-0.065-vStoneWorldPos.y);
+          roughnessFactor=mix(roughnessFactor,0.34,creekRoughWet*0.72);`
+        );
+        shader.fragmentShader=shader.fragmentShader.replace('#include <output_fragment>',`
+         float bankDepth=-0.065-vStoneWorldPos.y;
+         float bankWet=smoothstep(-0.018,0.024,bankDepth);
+         float bankLuma=dot(outgoingLight,vec3(0.299,0.587,0.114));
+         vec3 bankWetColor=mix(vec3(bankLuma),outgoingLight*vec3(0.80,0.85,0.76),1.10);
+         bankWetColor*=vec3(0.84,0.88,0.81);
+         outgoingLight=mix(outgoingLight,bankWetColor,bankWet*0.82);
+         #include <output_fragment>`);
+       };
+       material.customProgramCacheKey=()=>`${m.customProgramCacheKey?.()??'slab-detail-pbr-2'}-${heroBank?'refill-bank':'creek'}-scan-pbr`;
       }
       const inst=new T.InstancedMesh(geometry,material,matrices.length);inst.name=label;
       inst.onBeforeRender=(_renderer,_scene,camera)=>{uViewRotation.value.setFromMatrix4(camera.matrixWorldInverse);};
       matrices.forEach((matrix,i)=>inst.setMatrixAt(i,matrix));
       inst.instanceMatrix.needsUpdate=true;inst.castShadow=true;inst.receiveShadow=true;this.scene.add(inst);
      };
-     makeBatch(streamMatrices,false,'Scanned creek-crossing stones • full resolution');
+     makeBatch(streamMatrices,false,'Scanned creek-crossing stones • full-resolution scan PBR',null,true,false);
      makeBatch(landMatrices,true,'Scanned clearing stones');
-     makeBatch(refillBankHeroAMatrices,false,'Scanned refill-bank stone A • high detail',sources[0]??s,true,'#6d706a');
-     makeBatch(refillBankHeroBMatrices,false,'Scanned refill-bank stone B • high detail',sources[1]??sources[0]??s,true,'#756d63');
+     makeBatch(refillBankHeroAMatrices,false,'Scanned refill-bank stone A • full-resolution scan PBR',sources[0]??s,true,true,'#a7a397');
+     makeBatch(refillBankHeroBMatrices,false,'Scanned refill-bank stone B • full-resolution scan PBR',sources[1]??sources[0]??s,true,true,'#9d8f7d');
     });
   }
  // --- HERO PROPS INTERMEDIATE GLB IMPORT ---

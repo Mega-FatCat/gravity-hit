@@ -19,7 +19,7 @@ try{
  await page.evaluate(async()=>{const g=window.__game;await g.world.ready;g.begin();g.settings.quality='medium';g.settings.weather='clear';g.world.setQuality('medium');g.setState({phase:'free',mode:'idle',held:null,supporting:null,water:.3,cap:true,prep:2,tutorial:false});});
  await page.waitForTimeout(3000);
  const session=await createCaptureSession({outDir,page,minTriangles:1000,minCalls:1});
- const views=[['01-sun-through-canopy',.9273,.8],['02-sun-blocked',.9273,.8,[-3.5,1.1997412002515948,2.65]],['03-partial-exposure',.9273,.8,[-1,.98,1]],['04-perpendicular',-.64,.1],['05-dense-forest',2.5,.18],['06-stream',.75,-.2],['07-rocky-streambed',.68,-.61],['08-hero-props',0,-.265]];
+ const views=[['01-sun-through-canopy',.9273,.8],['02-sun-blocked',.9273,.8,[-2.5,2.8,1]],['03-partial-exposure',.9273,.8,[-1,.98,1]],['04-perpendicular',-.64,.1],['05-dense-forest',2.5,.18],['06-stream',.75,-.2],['07-rocky-streambed',.68,-.61],['08-hero-props',0,-.265]];
  const samples=[];
  for(const [name,yaw,pitch,camera=[0,.98,2.65]]of views){
   await page.evaluate(({yaw,pitch,camera})=>{window.__game.world.baseCam.fromArray(camera);window.__game.setView(yaw,pitch);},{yaw,pitch,camera});

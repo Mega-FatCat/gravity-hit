@@ -81,11 +81,20 @@ export function createStreamWater(world, geometry, normalTexture, level) {
    vec2 refractedUV=clamp(screenUV+offset,vec2(.002),vec2(.998));
    if(sceneDistance(refractedUV)<surfaceDistance+.002)refractedUV=screenUV;
    vec3 bottom=texture2D(bedColor,refractedUV).rgb;
-   // Beer-Lambert attenuation: a restrained mineral/organic green-brown body.
-   vec3 extinction=vec3(2.8,2.1,3.1);
+    // Beer-Lambert attenuation with shallow-creek clarity. At the same vertical
+    // depth an oblique camera ray is much longer; the old high extinction then
+    // erased every bed mineral family into one green body color. Keep the deeper
+    // water coefficients unchanged, but use lower physically-plausible turbidity
+    // only for the shallow streambed so the actual rock albedo can survive.
+    float shallowClarity=1.0-smoothstep(.14,.52,depth);
+    // image(6) is a very clear shallow woodland creek: even at an oblique
+    // camera angle the mineral colours remain legible through several tens of
+    // centimetres of water.  Use genuinely low suspended-turbidity extinction
+    // in that shallow band; only deeper water converges on the older body.
+    vec3 extinction=mix(vec3(2.8,2.1,3.1),vec3(.82,.67,.94),shallowClarity*.92);
    vec3 transmittance=exp(-extinction*min(pathLength,2.0));
    float illumination=.50+.50*getShadowMask();
-   vec3 body=vec3(.095,.125,.088)*illumination;
+    vec3 body=vec3(.080,.105,.074)*illumination;
    vec3 transmitted=bottom*transmittance+body*(1.0-transmittance);
    float theta=clamp(dot(normal,toEye),0.0,1.0);
    float fresnel=.0204+.9796*pow(1.0-theta,5.0);

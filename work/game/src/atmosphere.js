@@ -64,14 +64,14 @@ vec3 atmoWorldFromClip(vec3 clip){
 // shadowmap_pars_fragment chunk. A five tap PCF footprint is enough to soften
 // shafts at the existing PCFSoft shadow-map resolution without multiplying the
 // full 17-tap surface-lighting lookup across every ray step.
-float atmoShadowVisibility(vec3 worldPosition){
- if(uHasShadow<.5)return 0.0;
+vec2 atmoShadowVisibility(vec3 worldPosition){
+ if(uHasShadow<.5)return vec2(0.0);
  vec4 sc=uShadowMatrix*vec4(worldPosition,1.0);
  sc.xyz/=max(.000001,sc.w);
  vec2 uv=sc.xy;
  float z=sc.z;
  float inside=step(0.0,uv.x)*step(uv.x,1.0)*step(0.0,uv.y)*step(uv.y,1.0)*step(0.0,z)*step(z,1.0);
- if(inside<.5)return 0.0;
+ if(inside<.5)return vec2(0.0);
  vec2 texel=1.0/max(vec2(1.0),uShadowMapSize);
  float compare=z+.00035;
  float lit=0.0;
@@ -85,7 +85,16 @@ float atmoShadowVisibility(vec3 worldPosition){
  float edge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
  float edgeFade=smoothstep(.015,.12,edge);
  edgeFade*=smoothstep(.015,.12,z)*(1.0-smoothstep(.84,.985,z));
- return lit*edgeFade;
+ // Existing distance fog supplies the uniform airlight. Emphasize narrow
+ // illuminated gaps surrounded by real canopy shadows, rather than raising
+ // haze everywhere in the open clearing. This light-space footprint moves
+ // with the actual sun and its casters, independently of the camera.
+ vec2 gapOffset=texel*44.0;
+ float nearby=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv+vec2(gapOffset.x,0.0))));
+ nearby+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv-vec2(gapOffset.x,0.0))));
+ nearby+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv+vec2(0.0,gapOffset.y))));
+ nearby+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv-vec2(0.0,gapOffset.y))));
+ return vec2(lit*edgeFade,(1.0-nearby*.25)*lit*edgeFade);
 }
 
 void main(){
@@ -111,12 +120,12 @@ void main(){
   vec3 p=rayOrigin+rayDirection*t;
   float heightDensity=exp(-max(p.y-.12,0.0)*.17);
   float distanceFade=exp(-t*.032);
-  float density=.0035*heightDensity*distanceFade*smoothstep(.35,1.8,t);
+  vec2 shadow=atmoShadowVisibility(p);
+  float density=(.0025+.038*shadow.y)*heightDensity*distanceFade*smoothstep(.8,3.5,t);
   float sampleAlpha=1.0-exp(-density*stepLength);
-  float shadow=atmoShadowVisibility(p);
   float phaseCos=dot(rayDirection,uSunDirection);
   float phase=.15+.85*pow(max(phaseCos,0.0),4.0);
-  float direct=shadow;
+  float direct=shadow.x;
   vec3 tint=uSunColor*uSunIntensity;
   scattered+=(1.0-optical)*sampleAlpha*tint*phase*direct;
   optical+=sampleAlpha*(1.0-optical);
@@ -278,7 +287,7 @@ void main(){
  vec4 worldPosition=modelMatrix*vec4(p,1.0);
  vec4 viewPosition=viewMatrix*worldPosition;
  gl_Position=projectionMatrix*viewPosition;
- gl_PointSize=aSize*(260.0/max(.1,-viewPosition.z));
+ gl_PointSize=clamp(aSize*(260.0/max(.1,-viewPosition.z)),.7,3.5);
  float shadow=pollenShadow(worldPosition.xyz);
  float upLight=max(.0,uSunDirection.y);
  vIllum=.22+.78*shadow*upLight;

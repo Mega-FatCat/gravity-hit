@@ -9,7 +9,7 @@ try{
  await page.waitForFunction(()=>!!window.__game,null,{timeout:180000});
  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1920,1080));
  await page.evaluate(async()=>{const g=window.__game;await g.world.ready;g.begin();g.settings.quality='medium';g.settings.weather='clear';g.world.setQuality('medium');g.setState({phase:'free',mode:'idle',held:null,supporting:null,water:.3,cap:true,prep:2,tutorial:false});});
- await page.waitForTimeout(3000);
+ await page.waitForTimeout(8000);
  for(const [name,yaw,pitch]of [['canopy',.9273,.8],['stream',.75,-.2],['rocky-bed',.68,-.61]]){
   await page.evaluate(({yaw,pitch})=>window.__game.setView(yaw,pitch),{yaw,pitch});
   for(const enabled of [false,true,true,false]){
