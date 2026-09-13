@@ -1,4 +1,4 @@
-# Gravity Hit — Final Post-Luna Audit & Granular Implementation Backlog
+# Znicz (Formerly Gravity Hit) — Final Post-Luna Audit & Granular Implementation Backlog
 ## Based on reconstructed 3.0 GB project snapshot + current-agent continuation + latest user playtest/visual feedback
 
 > **Purpose:** copy-ready backlog for future implementation agents. It is deliberately decomposed into small, independently verifiable tasks so each task can be run as a separate prompt and manually checked before the next one.
@@ -42,7 +42,7 @@ However, the scene still fails the intended realism target because the visible w
 - canopy/needles still look strongly 2D/card-like,
 - insufficient understory density produces too much empty visible ground,
 - terrain lacks enough real meso/micro 3D breakup,
-- streambed is extremely weak and reads as a gray flat/low-detail area,
+- streambed has been rebuilt into a dense 3D reference-matched stone bed, but the latest strict photo-adherence cycle finished at **8.9/10 after the fifth and final allowed critic run**, so it remains `CURRENT BUILD NEEDS MANUAL CHECK`,
 - hero props still fail close inspection,
 - weed/bud representation is crude,
 - some interaction sequences are still order-dependent instead of world-logic-dependent,
@@ -91,6 +91,15 @@ Use this text at the top of each future implementation prompt:
 > For visual tasks, capture the exact required before/after views. For gameplay tasks, perform the exact state/interaction verification listed.  
 > Update the task status in the backlog/handoff using canonical categories: **USER VERIFIED CURRENT**, **AUTOMATED VERIFIED**, **CURRENT BUILD NEEDS MANUAL CHECK**, **PREVIOUS AGENT CLAIM**, **FIXED BUT REGRESSION-PRONE**, or **SUPERSEDED**, with evidence.  
 > Then STOP.
+
+### Reference-driven visual-task addendum — user directive 2026-09-13
+
+- Every research, implementation, and critic agent assigned to a reference-matching visual task must **directly open the exact authoritative user reference** before doing its part. Another agent's prose description is not sufficient.
+- If an assigned agent cannot actually view the reference, it must report the access blocker instead of guessing from descriptions.
+- Use the sequence **research -> implementation -> critic** when the user authorizes those roles.
+- The implementation must change the real application and be judged from fresh runtime captures; do not substitute a generated target image for code or QA.
+- Preserve a true pre-change capture set and finish with a **before/after comparison file containing several matched viewpoints**.
+- If the user specifies a critic threshold or maximum number of runs, treat both as hard limits. For the current STREAM-BED-01 cycle the threshold is **>= 9.0/10** and the limit was **5 critic evaluations**; the fifth/final score was **8.9/10**, so no sixth run should occur without explicit new user authorization.
 
 ---
 
@@ -707,7 +716,18 @@ GH-32.
 
 ## GH-34 — Improve contact/embedding of terrain details
 **Priority:** P1  
-**Size:** SMALL
+**Size:** SMALL  
+**Status:** `[AUTOMATED VERIFIED: 80/80 UNIT TESTS PASS; QA CAPTURES VERIFIED; CURRENT BUILD NEEDS MANUAL CHECK]`
+
+### Problem & Implementation
+Terrain clutter and forest-floor details suffered from Euler-angle crosstalk tilting props off terrain normals, upright standing pine cones, floating stick/branch endpoints on slopes, and insufficient rock/shrub root embedding.
+
+Implemented:
+- Replaced Euler angle rotation (`rotation.set(rx, rot, rz)`) across all clutter, rock, gravel, and understory systems with orthonormal quaternion normal alignment (`multiplyQuaternions(qAlign, qYaw)`), eliminating gimbal crosstalk.
+- Two-point longitudinal pitch alignment (`addElongatedInstance()`) for sticks, forked twigs, branches, and nurse logs, guaranteeing both endpoints contact the terrain contour without hovering or cutting.
+- Reoriented pine cone geometry horizontally with 36% diameter belly embedding into pine needles, eliminating unnatural vertical pine cones.
+- Recalibrated embedding depths for scanned rocks (48%–54%), stream gravel (18%), bark flakes, leaf clusters, shrubs, ferns, and saplings (2.2cm to 5.0cm base embed).
+- Verification: `scripts/inspect-contact.mjs` confirms 100% horizontal pine cones (`upDot` <= 0.169), sticks embedded >= 9.7mm, rocks seated without hovering skirts. 8 QA viewpoints captured in `qa/gh34-evidence/`.
 
 ### Desired result
 Partial embedding, orientation to terrain normal, contact shadows and credible intersections.
@@ -722,22 +742,43 @@ GH-32 / GH-33.
 ## GH-35 — Rebuild the streambed as heavily 3D gravel/stone terrain
 **Priority:** P1  
 **Size:** LARGE but focused  
-**Status:** USER-CONFIRMED “AWFUL / GRAY BLOB”
+**Status:** CURRENT BUILD NEEDS MANUAL CHECK (LATEST REFERENCE CYCLE: 91/91 TESTS PASS, BUILD PASS, 11/11 VALID QA CAPTURES, FINAL CRITIC 8.9/10 AFTER USER-CAPPED FIVE-RUN LOOP)
 
 ### Problem
-The water itself is acceptable, but the stream floor is one of the worst-looking areas. It reads as a gray flat/low-detail patch.
+The water itself is acceptable, but the stream floor was previously an unrealistic gray flat/low-detail patch.
 
-### Desired result
-A physically modeled shallow streambed with:
-- dense gravel layer,
-- pebbles of several sizes,
-- partially buried stones,
-- larger anchor rocks,
-- sediment pockets,
-- uneven depth,
-- visible bed relief,
-- variation in rock orientation and burial,
-- no flat gray sheet appearance.
+### Implementation & Verification (2026-09-11 - Iteration 3 Final)
+- **Scanned & Procedural 3D Fluvial Geometries (`streambed.js`)**:
+  - Class 1 Anchor Boulders and Class 2 River Cobbles dynamically upgraded with scanned 3D photogrammetry meshes from `rock_moss_set_01` (`sources[1]` and `sources[3]`).
+  - Retained procedural fluvial geometries for Class 3 pebbles, Class 3b shingle discs, Class 4 pea gravel, and Class 5 interstitial sediment grit with hydraulic asymmetry and water-smoothed cleavage planes.
+- **Shared 4K Photogrammetry Textures & Calibration**:
+  - Streambed PBR material uses the exact 4K maps (`diff_4k.jpg`, `nor_gl_4k.jpg`, `rough_4k.jpg`, `ao_4k.jpg`) from `rock_moss_set_01` and `rock_boulder_dry` as the hero ritual rock slab.
+  - Albedo grain calibrated to `mDiff / vec3(0.658, 0.609, 0.550)` matching the slab.
+- **Physical Wetness & Matte Tops**:
+  - Exposed stone facets drying in air have matte roughness (`0.86`) matching the ritual slab; submerged stones have satin dampness (`0.32`); waterline meniscus has an ultra-tight glossy rim (`0.07`).
+- **Cool Mountain Hollow Mineral Palette**:
+  - Granite (`#9fa4a4`), Slate (`#5e6565`), Weathered Bedrock (`#767066`), Basalt (`#404242`), Moss Patina (`#566248`), Quartzite (`#b8b0a2`).
+- **Anti-Tower Single-Tier Physical Stacking**:
+  - Prevented stacking on already-stacked stones; enforced size hierarchy (`r >= base.r * 1.40`) and strict ground relief ceiling (`groundY + base.h * 1.15`), eliminating vertical spires.
+- **Sedimentary Bedding Underbed (`environment.js`)**:
+  - Replaced grey sludge ground plane with dark, saturated wet gravel sediment.
+- **Critic Subagent Verdict (Iteration 3)**:
+  - 1. *Do rocks/pebbles look just as good as the big rock that has items on it?* -> **YES**
+  - 2. *Rate 1/10 on how realistic and good looking the riverbed is.* -> **9 / 10** (Target > 7.0 / 10 passed).
+- **Automated Verification**:
+  - `node --test tests/*.test.mjs`: **80/80 PASS** (0 regressions).
+  - `node scripts/inspect-contact.mjs`: **PASS** (`floatingCount: 0`).
+  - `qa/gh35-rebuild/capture.json`: 5 views captured at 1920×1080 with valid WebGL provenance.
+
+### Latest Reference-Photo Size-Hierarchy Cycle (2026-09-13)
+- The user reposted the authoritative creek-bed reference and explicitly corrected the previous candidate: the average visible stone was too small, with too many tiny pebbles and not enough medium/larger stones.
+- Every participating research/implementation/critic agent was required to inspect that exact reference directly before doing its work.
+- The physical bed was rebalanced from the prior 13,391-instance fine-biased state to **9,705 physical instances**: 33 anchors, 1,200 cobbles, 4,097 medium, 2,339 pebbles, 608 shingle, 973 gravel and 455 grit. Small tiers now act more as interstitial fill, while medium/cobble clasts dominate the visible hierarchy.
+- **400 existing center/far medium placements** are promoted render-side into rounded/sub-rounded upper-cobble families to create the reference's restrained ~14–24 cm secondary tier without adding collision instances.
+- Stream course, water, accepted bank geometry, refill behavior, spatial packing/collision rules and scan-family diversity were preserved.
+- Final exact-source verification: `npm.cmd test` **91/91 PASS**, `npm.cmd run build` **PASS**, and `work/game/qa/stream-bed-01/` contains **11/11 valid** fresh captures with `errors: []`; current render metadata is 41 streambed batches and ~38.21M streambed triangles per color pass.
+- Strict critic trajectory against the same photo: **6.7 -> 8.1 -> 7.4/9.0 conflicting -> 8.6/9.4 conflicting -> 8.9 final**. The fifth and final user-authorized score is **8.9/10 FAIL** against the required >=9 threshold. Remaining mismatch is mainly submerged center/far mineral/value separation, with secondary pale edge-string regularity and a few dark anchors. No sixth score may be run without new user authorization.
+- A true pre-cycle comparison set is preserved in `work/game/qa/stream-bed-01-size-rebalance-before/`; the final matched QA set is in `work/game/qa/stream-bed-01/`.
 
 ### Important
 Do **not** solve this with only a shader or texture. Strong 3D is required.
@@ -865,14 +906,34 @@ Reuse/update geometry or use a cheaper deformable representation if profiling sh
 ## GH-43 — Document / reduce hero-prop runtime representation ambiguity
 **Priority:** P2  
 **Size:** MEDIUM  
-**Status:** ARCHITECTURAL REGRESSION RISK
+**Status:** AUTOMATED VERIFIED & ARCHITECTURALLY CLARIFIED (CURRENT BUILD NEEDS MANUAL CHECK)
 
 ### Problem
-Hero props can pass through multiple representations:
-fallback → GLB load → runtime `upgradeHeroProps()` rebuild/correction.
+Hero props historically passed through multiple disconnected representations:
+fallback startup geometry (`world.js:makeObjects()`) → intermediate GLB load (`world.js:loadAssets()`) → runtime `props.js:upgradeHeroProps()` rebuild/correction, causing extreme risk that future agents modify the wrong model or script.
 
 ### Desired result
 At minimum document final runtime ownership and mark unused/superseded models. Simplify only if safe.
+
+### Implementation & Source-of-Truth Resolution
+1. **Bottle (`items.bottle`)**:
+   - `work/build_bottle.py` and `bottle.glb`: `[SUPERSEDED AT RUNTIME]`.
+   - `world.js:makeObjects()` lathe & `world.js:upgradeBottle()`: `[SUPERSEDED AT RUNTIME]`.
+   - **Runtime Source-of-Truth**: `work/game/src/props.js -> rebuildBottle()`. 100% procedural 96-segment PET shell (`thinShellResponse` dielectric Fresnel + `createPetNormalTexture()`), 2048x512 BoPP label (`bottleLabel()` + `createLabelNormalTexture()`), helical neck threads, 28mm knurled cap, and charred melted outlet lip.
+2. **Pipe (`items.pipe`)**:
+   - `work/build_pipe.py` and `pipe.glb`: `[SUPERSEDED AT RUNTIME]`.
+   - `world.js:makeObjects()` & `world.js:upgradePipe()`: `[SUPERSEDED AT RUNTIME]`.
+   - **Runtime Source-of-Truth**: `work/game/src/props.js -> rebuildPipe()`. 100% procedural 96-segment slim borosilicate chillum (`borosilicateResponse` grazing shader), 28mm knurled cap with aperture (`createCapGeometry(true)`), rubber grommet, and progressive 2D canvas amber resin accumulation (`createPipeResidueTexture()`).
+3. **Lighter (`items.lighter`)**:
+   - `world.js:makeObjects()` startup cylinder: `[SUPERSEDED AT RUNTIME]`.
+   - `work/build_hero.py` / `clipper.glb`: `[HYBRID: PARTIALLY ACTIVE]`. Only lower chassis meshes (`Body`, `Base mould seam`, `Refill valve`, `Refill valve recess`, `Upper collar`) are retained.
+   - **Runtime Source-of-Truth**: `work/game/src/props.js -> correctLighter()`. Replaces all GLB head parts with procedural brass burner nozzle, stainless steel windscreen guard with rolled rim & vents, polymer flint stanchion with brass bushing & steel axle, knurled 24-tooth striker wheel rotor (`world.wheel`), ergonomic gas actuator lever with 3 grip ridges, and 1024x1024 canvas wrap decal.
+4. **Code & Asset Ledger Updates**:
+   - Added authoritative architecture headers to `work/game/src/props.js`.
+   - Annotated `world.js` methods (`makeObjects()`, `upgradeBottle()`, `upgradePipe()`, `upgradeLighter()`).
+   - Added obsolete/superseded warnings to Blender generator scripts (`work/build_bottle.py`, `work/build_pipe.py`, `work/build_hero.py`).
+   - Added hero-prop entries to `work/game/public/assets/sources.json` and clarified `README.md`.
+   - Fully mapped in `PROJECT_HANDOFF.md`.
 
 ---
 
