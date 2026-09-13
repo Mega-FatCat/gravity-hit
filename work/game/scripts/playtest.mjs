@@ -1,7 +1,7 @@
 import {_electron as electron} from 'playwright-core';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import fs from 'node:fs/promises';
+import fs from 'node:fs/promises';import fsSync from 'node:fs';
 const standalone=process.argv.includes('--standalone'),full=process.argv.includes('--full');
 const out=path.resolve(standalone?'../qa/recovery-standalone':'../qa/recovery-playtest');await fs.mkdir(out,{recursive:true});
 if(standalone){
@@ -10,7 +10,10 @@ if(standalone){
  if(!releaseQa.startsWith(releaseRoot+path.sep))throw Error('Unexpected QA data location');
  await fs.rm(releaseQa,{recursive:true,force:true});
 }
-const launch={args:standalone?['--qa','--qa-persist']:['.','--qa'],executablePath:path.resolve(standalone?'../../outputs/Stillwater/Stillwater.exe':'node_modules/electron/dist/electron.exe'),cwd:standalone?out:process.cwd(),timeout:90000};
+const exeZnicz=path.resolve('../../outputs/Stillwater/Znicz.exe');
+const exeStillwater=path.resolve('../../outputs/Stillwater/Stillwater.exe');
+const packagedExe=fsSync.existsSync(exeZnicz)?exeZnicz:exeStillwater;
+const launch={args:standalone?['--qa','--qa-persist']:['.','--qa'],executablePath:path.resolve(standalone?packagedExe:'node_modules/electron/dist/electron.exe'),cwd:standalone?out:process.cwd(),timeout:90000};
 const app=await electron.launch(launch),page=await app.firstWindow(),errors=[],checks=[],worldClicks=[];
 page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
 await page.route('https://**/*',r=>r.abort());

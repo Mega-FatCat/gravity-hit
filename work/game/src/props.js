@@ -1,9 +1,54 @@
 import * as T from 'three';
+import {normalizeLatheNormals,specularAntialiasing} from './edge-quality.js';
+
+// ============================================================================
+// HERO-PROP RUNTIME SOURCE-OF-TRUTH (GH-43 ARCHITECTURAL AUDIT)
+// ============================================================================
+// This module owns the FINAL RUNTIME REPRESENTATION for all three hero props:
+//
+// 1. BOTTLE (100% Procedural in props.js):
+//    - Rebuilt by rebuildBottle().
+//    - Assets 'bottle.glb' (from work/build_bottle.py) and initial lathe in
+//      world.js:makeObjects() are COMPLETELY SUPERSEDED and discarded at runtime.
+//    - Real runtime meshes:
+//      * Shell: 96-segment lathe with 5-petal base, parting seams, crinkles,
+//        PBR thinShellResponse shader + createPetNormalTexture().
+//      * Label: 96-segment cylinder with 2048x512 canvas texture + normal map.
+//      * Neck thread: TubeGeometry helical CatmullRom spiral.
+//      * Cap: 64-segment knurled 28mm cap (createCapGeometry(false)).
+//      * Outlet: Melted TorusGeometry lip + CircleGeometry outlet aperture.
+//
+// 2. PIPE (100% Procedural in props.js):
+//    - Rebuilt by rebuildPipe().
+//    - Assets 'pipe.glb' (from work/build_pipe.py) and initial lathe in
+//      world.js:makeObjects() are COMPLETELY SUPERSEDED and discarded at runtime.
+//    - Real runtime meshes:
+//      * Glass: 96-segment slim chillum lathe + borosilicateResponse shader.
+//      * Cap: 64-segment knurled cap with aperture (createCapGeometry(true)).
+//      * Grommet: Rubber seal collar lathe geometry.
+//      * Residue: Inner bore lathe with dynamic 2D canvas texture updated
+//        per hit in world.heroProps.update(sim).
+//      * Tip / Ember / Bud: Positioned anchors and procedural weed bud.
+//
+// 3. LIGHTER (Hybrid: GLB Chassis + Procedural Head in props.js):
+//    - Upgraded by correctLighter().
+//    - 'clipper.glb' (from work/build_hero.py) supplies ONLY the lower chassis:
+//      ['Body', 'Base mould seam', 'Refill valve', 'Refill valve recess', 'Upper collar'].
+//    - All upper mechanism parts in 'clipper.glb' (wheel, flint, shield, lever,
+//      nozzle) are STRIPPED OUT and replaced with high-precision procedural meshes:
+//      * Windscreen: Stainless steel curved hood + rolled tube rim + vent slots.
+//      * Burner nozzle: Machined brass valve collar + orifice tip + steel bore.
+//      * Flint stanchion: Polymer column + brass bushing + axle brackets + flint stick.
+//      * Striker wheel (world.wheel): Fluted dark steel body + 24 knurled teeth.
+//      * Gas lever: Ergonomic thumb rest pad with 3 grip ridges + forward fork arms.
+//      * Wrap: 1024x1024 high-res canvas sticker graphic.
+// ============================================================================
 
 const V=(x=0,y=0,z=0)=>new T.Vector3(x,y,z);
 function lathe(profile,segments=96,smooth=false){
  const points=smooth?new T.CatmullRomCurve3(profile.map(([r,y])=>V(r,y,0)),false,'centripetal').getPoints(profile.length*5).map(p=>new T.Vector2(Math.max(.0001,p.x),p.y)):profile.map(p=>new T.Vector2(...p));
- return new T.LatheGeometry(points,segments);
+ const first=profile[0],last=profile[profile.length-1];
+ return normalizeLatheNormals(new T.LatheGeometry(points,segments),first[0]===last[0]&&first[1]===last[1]);
 }
 function add(parent,name,geometry,material,position=V()){
  const mesh=new T.Mesh(geometry,material);mesh.name=name;mesh.position.copy(position);parent.add(mesh);
@@ -32,20 +77,23 @@ outgoingLight+=plasticSheen;
 #include <opaque_fragment>`);
  };
  material.customProgramCacheKey=()=>`thin-shell-pet-${face}-${edge}`;
+ specularAntialiasing(material);
 }
 function borosilicateResponse(material){
  // Keep the broad face optically clear while giving the very thin wall a
- // restrained grazing-angle highlight. This is surface readability, not a
- // frosted alpha treatment, so the forest remains visible through the pipe.
+ // restrained grazing-angle highlight and crisp fire-polished rim catch-lights.
  material.onBeforeCompile=shader=>{
   shader.fragmentShader=shader.fragmentShader.replace('#include <opaque_fragment>',`
-float pipeGrazing=pow(1.-abs(dot(normalize(normal),normalize(vViewPosition))),1.9);
+float pipeGrazing=pow(1.-abs(dot(normalize(normal),normalize(vViewPosition))),1.8);
 float pipeLuma=dot(outgoingLight,vec3(.2126,.7152,.0722));
-vec3 pipeEdgeTone=vec3(mix(.76,.24,smoothstep(.38,.62,pipeLuma)));
-outgoingLight=mix(outgoingLight,pipeEdgeTone,pipeGrazing*.24);
+vec3 pipeEdgeTone=vec3(mix(.84,.30,smoothstep(.35,.65,pipeLuma)));
+vec3 borosilicateTint=vec3(.94,.98,.96);
+outgoingLight=mix(outgoingLight*borosilicateTint,pipeEdgeTone,pipeGrazing*.12);
+outgoingLight+=vec3(.14,.18,.16)*pow(pipeGrazing,2.4)*.50;
 #include <opaque_fragment>`);
  };
- material.customProgramCacheKey=()=>`borosilicate-edge-v4`;
+ material.customProgramCacheKey=()=>`borosilicate-edge-v6`;
+ specularAntialiasing(material);
 }
 
 let lastDrawnResidue=-1;
@@ -183,7 +231,7 @@ function rebuildPipe(world){
   [.00272,.0170],[.00272,-.0100],[.00272,-.0330],[.00274,-.0430],
   [.00300,-.0490],[.00345,-.0490]
  ];
- const glass=new T.MeshPhysicalMaterial({color:'#f4fbf7',roughness:.05,metalness:0,transmission:1,thickness:.0007,ior:1.474,transparent:false,opacity:1,depthWrite:false,side:T.DoubleSide,envMapIntensity:1.8,clearcoat:.45,clearcoatRoughness:.06});
+ const glass=new T.MeshPhysicalMaterial({color:'#f4fbf7',roughness:.035,metalness:0,transmission:1,thickness:.0012,ior:1.474,transparent:false,opacity:1,depthWrite:false,side:T.DoubleSide,envMapIntensity:2.2,clearcoat:.85,clearcoatRoughness:.03});
  borosilicateResponse(glass);
  world.pipeMat=glass;world.pipeGlass=add(pipe,'Slim borosilicate one-hitter',lathe(profile,96),glass);world.pipeGlass.renderOrder=5;
   // Authentic 28mm knurled water bottle cap geometry for pipe assembly
@@ -629,8 +677,7 @@ function correctLighter(world){
   'Upper_collar','Upper collar'
  ]);
  for(const child of [...model.children]){
-  const isOurWrap=child.name==='Right-hand-facing printed wrap';
-  if(!isOurWrap&&(!keepFromModel.has(child.name)||child.name==='Clipper top assembly')){
+  if(!keepFromModel.has(child.name)||child.name==='Clipper top assembly'||child.name==='Right-hand-facing printed wrap'){
    model.remove(child);
    child.traverse(o=>{
     const i=world.interactive.indexOf(o);
@@ -759,14 +806,30 @@ function correctLighter(world){
  // Printed graphic wrap
  const texture=canvasTexture(1024,1024,(c,w,h)=>{
   c.fillStyle='#111312';c.fillRect(0,0,w,h);
-  for(const x of [w*.25,w*.75]){
-   c.fillStyle='#edf0e9';c.textAlign='center';c.font='700 39px Arial';c.fillText('CLIPPER',x,128);
-   c.strokeStyle='#b5bcb4';c.lineWidth=2;c.beginPath();c.moveTo(x-100,160);c.lineTo(x+100,160);c.stroke();
-   c.fillStyle='#f4f4ee';c.font='800 92px Arial';c.fillText('HIGH',x,360);c.font='700 61px Arial';c.fillText('AS',x,480);c.font='800 91px Arial';c.fillText('FUCK',x,618);
-   c.fillStyle='#d4dbd0';c.font='70px Georgia';c.fillText('✦',x,785);c.font='18px Arial';c.fillText('REFILL. REUSE. REPEAT.',x,920);
+  // FRONT PANEL: centered at x = w * 0.25 (facing camera in standard held/front view)
+  const fx=w*0.25;
+  c.fillStyle='#edf0e9';c.textAlign='center';c.font='700 36px Arial';c.fillText('CLIPPER',fx,130);
+  c.strokeStyle='#b5bcb4';c.lineWidth=2;c.beginPath();c.moveTo(fx-75,158);c.lineTo(fx+75,158);c.stroke();
+  c.fillStyle='#f4f4ee';c.font='800 80px Arial';c.fillText('HIGH',fx,355);c.font='700 54px Arial';c.fillText('AS',fx,475);c.font='800 80px Arial';c.fillText('FUCK',fx,610);
+  c.fillStyle='#d4dbd0';c.font='60px Georgia';c.fillText('✦',fx,775);c.font='16px Arial';c.fillText('REFILL. REUSE. REPEAT.',fx,910);
+
+  // BACK PANEL: centered at x = w * 0.75 (authentic technical markings, barcode & safety info)
+  const bx=w*0.75;
+  c.fillStyle='#edf0e9';c.textAlign='center';c.font='700 24px Arial';c.fillText('CLIPPER',bx,160);
+  c.fillStyle='#ffffff';c.fillRect(bx-70,220,140,80);
+  c.fillStyle='#162419';
+  for(let i=0;i<32;i++){
+   const lw=((i*5+3)%3===0)?3:1.4;
+   c.fillRect(bx-60+i*3.8,228,lw,52);
   }
+  c.font='10px monospace';c.textAlign='center';c.fillText('8 412765 001924',bx,292);
+  c.fillStyle='#8e9890';c.font='600 13px Arial';c.fillText('ISO 9994 · MADE IN SPAIN',bx,340);
+  c.fillText('KEEP AWAY FROM CHILDREN',bx,370);
+  c.font='12px Arial';c.fillText('FLAMMABLE GAS UNDER PRESSURE',bx,400);
+  c.strokeStyle='#5a635c';c.lineWidth=1.5;c.strokeRect(bx-85,430,170,48);
+  c.fillStyle='#d4dbd0';c.font='700 14px Arial';c.fillText('DO NOT PUNCTURE / INCINERATE',bx,460);
  });
- const sticker=add(model,'Right-hand-facing printed wrap',new T.CylinderGeometry(.00823,.00818,.054,96,1,true),new T.MeshStandardMaterial({map:texture,roughness:.47}),V(0,.031,0));sticker.rotation.y=Math.PI/2-bodyRoll;
+ const sticker=add(model,'Right-hand-facing printed wrap',new T.CylinderGeometry(.00823,.00818,.054,96,1,true),new T.MeshStandardMaterial({map:texture,roughness:.47}),V(0,.031,0));sticker.rotation.y=-Math.PI/2-bodyRoll;
 
  model.traverse(o=>{
   if(o.isMesh){
@@ -787,7 +850,7 @@ function correctLighter(world){
  model.updateMatrixWorld(true);
  topAssembly.updateMatrixWorld(true);
  const nozzleWorldPos=nozzleTip.getWorldPosition(new T.Vector3());
- world.nozzle=model.worldToLocal(nozzleWorldPos.clone());
+ world.nozzle=lighter.worldToLocal(nozzleWorldPos.clone());
  world.flameAnchor=world.nozzle.clone().add(V(0,.021,0));
  world.flame.position.copy(world.nozzle);
  world.flameCore.position.copy(world.nozzle);

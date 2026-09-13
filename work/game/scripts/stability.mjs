@@ -1,8 +1,10 @@
 import {_electron as electron} from 'playwright-core';
-import fs from 'node:fs/promises';import path from 'node:path';
+import fs from 'node:fs/promises';import fsSync from 'node:fs';import path from 'node:path';
 const standalone=process.argv.includes('--standalone');
 const out=path.resolve('../qa/recovery',standalone?'stability-standalone':'stability');await fs.mkdir(out,{recursive:true});
-const executablePath=path.resolve(standalone?'../../outputs/Stillwater/Stillwater.exe':'node_modules/electron/dist/electron.exe');
+const exeZnicz=path.resolve('../../outputs/Stillwater/Znicz.exe');
+const exeStillwater=path.resolve('../../outputs/Stillwater/Stillwater.exe');
+const executablePath=standalone?(fsSync.existsSync(exeZnicz)?exeZnicz:exeStillwater):path.resolve('node_modules/electron/dist/electron.exe');
 const app=await electron.launch({args:standalone?['--qa']:['.','--qa'],executablePath,timeout:90000});
 const page=await app.firstWindow(),errors=[],cases=[];page.on('pageerror',e=>errors.push(e.message));
 try{

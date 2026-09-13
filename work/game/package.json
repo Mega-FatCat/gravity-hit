@@ -1,5 +1,6 @@
 {
   "name": "stillwater",
+  "productName": "ZNICZ",
   "version": "1.0.0",
   "description": "A quiet forest ritual. A portable first-person simulation.",
   "private": true,

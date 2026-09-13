@@ -1,3 +1,17 @@
+# ============================================================================
+# WARNING — OBSOLETE / SUPERSEDED AT RUNTIME (GH-43 ARCHITECTURAL AUDIT)
+# ============================================================================
+# This script exports 'work/game/public/assets/pipe.glb'.
+# NOTE: In the live game, 'pipe.glb' is COMPLETELY SUPERSEDED.
+# The true runtime source-of-truth for the pipe (slim chillum borosilicate glass,
+# custom edge Fresnel shader, 28mm cap aperture grommet, and progressive
+# dynamic 2D canvas resin accumulation) is generated procedurally in:
+#   work/game/src/props.js -> rebuildPipe()
+#
+# Do NOT modify this file expecting in-game visual changes to the pipe.
+# Edit work/game/src/props.js instead.
+# ============================================================================
+
 import bpy
 import math
 import os

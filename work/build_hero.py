@@ -1,3 +1,19 @@
+# ============================================================================
+# NOTE — HYBRID ASSET / PARTIAL RUNTIME USE (GH-43 ARCHITECTURAL AUDIT)
+# ============================================================================
+# This script exports 'work/game/public/assets/clipper.glb'.
+# NOTE: In the live game, only the LOWER CHASSIS meshes are retained:
+#   ['Body', 'Base mould seam', 'Refill valve', 'Refill valve recess', 'Upper collar']
+#
+# The upper mechanism (striker wheel, wheel teeth, wheel axle, flint stanchion,
+# steel windscreen guard, burner nozzle, gas lever) and the graphic wrap are
+# STRIPPED OUT and procedurally constructed at higher fidelity in:
+#   work/game/src/props.js -> correctLighter()
+#
+# If you want to modify lighter ergonomics, windscreen, striker wheel, or wrap,
+# edit work/game/src/props.js.
+# ============================================================================
+
 import bpy, math, os
 from mathutils import Vector
 root=os.path.dirname(os.path.abspath(__file__))

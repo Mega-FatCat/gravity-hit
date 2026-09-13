@@ -1,3 +1,17 @@
+# ============================================================================
+# WARNING — OBSOLETE / SUPERSEDED AT RUNTIME (GH-43 ARCHITECTURAL AUDIT)
+# ============================================================================
+# This script exports 'work/game/public/assets/bottle.glb'.
+# NOTE: In the live game, 'bottle.glb' is COMPLETELY SUPERSEDED.
+# The true runtime source-of-truth for the bottle (thin PET shell, corrugation
+# ribs, BoPP wrap label with normal map, knurled cap, helical neck thread,
+# and melted outlet lip) is generated procedurally in:
+#   work/game/src/props.js -> rebuildBottle()
+#
+# Do NOT modify this file expecting in-game visual changes to the bottle.
+# Edit work/game/src/props.js instead.
+# ============================================================================
+
 import bpy
 import math
 import os

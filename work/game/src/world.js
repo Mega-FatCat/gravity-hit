@@ -10,9 +10,12 @@ import {flameMaterial} from './flame.js';
 import {upgradeHeroProps} from './props.js';
 import {createBudGeometry,createBudMaterial,renderBudSpriteDataUrl} from './bud.js';
 import {createWeedBag} from './weed-bag.js';
-import {buildForestFloor,forestHeight,forestBase,creekX,creekWidth,plantFerns,plantShrubs,plantGrass,plantPines,loadForestDetails,updateEnvironment} from './environment.js';
+import {buildForestFloor,forestHeight,forestBase,creekX,creekWidth,creekBankMeander,plantFerns,plantShrubs,plantGrass,plantPines,loadForestDetails,updateEnvironment} from './environment.js';
+import {upgradeStreambedGeometries} from './streambed.js';
 import {prepareInteractionFrame} from './interaction-view.js';
 import {resolveLogicalHit,visibleSurface} from './picking.js';
+import {FinalEdgePass} from './final-edge-pass.js';
+import {Atmosphere} from './atmosphere.js';
 
 const V=(x=0,y=0,z=0)=>new T.Vector3(x,y,z);
 const mat=(color,roughness=.7,extra={})=>new T.MeshStandardMaterial({color,roughness,...extra});
@@ -65,11 +68,13 @@ export class World {
   this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=T.PCFSoftShadowMap;
   this.renderer.localClippingEnabled=true;
   this.renderer.toneMapping=T.ACESFilmicToneMapping;this.renderer.toneMappingExposure=.90;
+  this.finalEdges=new FinalEdgePass();
   this.scene=new T.Scene();this.scene.background=new T.Color('#1a241b');this.scene.fog=new T.Fog('#1a241b',24.0,85.0);
   this.camera=new T.PerspectiveCamera(53,innerWidth/innerHeight,.025,150);this.camera.position.set(0,.98,2.65);this.camera.lookAt(0,.32,.3);
   this.baseCam=this.camera.position.clone();this.yaw=0;this.pitch=-.265;this.wind=0.5;this.weather='clear';this.time=0;this.windMats=[];this.sway=[];this.items={};this.interactive=[];this.pointer=new T.Vector2();this.raycaster=new T.Raycaster();this.target=V();this.projected={};
   this.sun=new T.DirectionalLight('#fff2d8',1.5);this.sun.position.set(16,36,-18);this.sun.castShadow=true;this.sun.shadow.mapSize.set(4096,4096);Object.assign(this.sun.shadow.camera,{left:-60,right:60,top:60,bottom:-60,near:1,far:140});this.sun.shadow.normalBias=.025;this.sun.shadow.bias=-.0001;this.scene.add(this.sun);this.scene.add(this.sun.target);
   this.scene.add(new T.HemisphereLight('#8ea89a','#242c1c',0.85));
+  this.atmosphere=new Atmosphere(this);
   this.makeGround();this.makeObjects();this.makeParticles();
   this.ready=this.loadAssets(onProgress);
  }
@@ -105,7 +110,7 @@ export class World {
    (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/fern_02/fern_02.gltf'),gl.loadAsync('./assets/fern_02_lod.glb')]);plantFerns(this,model.scene,lod.scene);})(),
    (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/shrub_04/shrub_04.gltf'),gl.loadAsync('./assets/shrub_04_lod.glb')]);this.makeShrubs(model.scene,lod.scene);})(),
    (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/grass_clumps_lod.glb'),gl.loadAsync('./assets/grass_far_lod.glb')]);plantGrass(this,model.scene,lod.scene);})(),
-   (async()=>{try{const [model]=await Promise.all([gl.loadAsync('./assets/pine.glb'),this.pineBarkReady]);this.makePines(model.scene);}catch(e){console.warn('Pine LOD unavailable',e.message);}})()
+   (async()=>{try{const [model]=await Promise.all([gl.loadAsync('./assets/pine.glb'),this.pineBarkReady,...this.foliageAlphaReady]);this.makePines(model.scene);}catch(e){console.warn('Pine LOD unavailable',e.message);}})()
   ];const result=await Promise.allSettled(tasks);this.assetErrors=result.filter(r=>r.status==='rejected').map(r=>String(r.reason));if(this.assetErrors.length)console.error(this.assetErrors);upgradeHeroProps(this);this.renderer.compile(this.scene,this.camera);this._shadowState=null;this.renderer.shadowMap.needsUpdate=true;return this;
  }
  makeGround(){buildForestFloor(this);}
@@ -155,17 +160,29 @@ export class World {
     m.onBeforeCompile=shader=>{
       Object.assign(shader.uniforms,{uMicroDiff,uMicroNormal,uMicroRough,uMicroAO,uViewRotation});
       shader.vertexShader=shader.vertexShader.replace('#include <common>',
-        '#include <common>\nvarying vec3 vStoneWorldPos;\nvarying vec3 vStoneWorldNorm;'
+        '#include <common>\nvarying vec3 vStoneWorldPos;\nvarying vec3 vStoneWorldNorm;\nvarying vec3 vStreamMaskPos;'
       ).replace('#include <begin_vertex>',
         `#include <begin_vertex>
-         vStoneWorldPos=(modelMatrix*vec4(transformed,1.0)).xyz;
-         vec3 invScaleSq=1.0/vec3(dot(modelMatrix[0].xyz,modelMatrix[0].xyz),dot(modelMatrix[1].xyz,modelMatrix[1].xyz),dot(modelMatrix[2].xyz,modelMatrix[2].xyz));
-         vStoneWorldNorm=normalize(mat3(modelMatrix)*(normal*invScaleSq));`
+         #ifdef USE_INSTANCING
+          mat4 instModel=modelMatrix*instanceMatrix;
+          vStoneWorldPos=(instModel*vec4(transformed,1.0)).xyz;
+          vStreamMaskPos=vStoneWorldPos;
+          vec3 scaleSq=vec3(dot(instModel[0].xyz,instModel[0].xyz),dot(instModel[1].xyz,instModel[1].xyz),dot(instModel[2].xyz,instModel[2].xyz));
+          vec3 invScaleSq=1.0/max(vec3(0.0001),scaleSq);
+          vStoneWorldNorm=normalize(mat3(instModel)*(normal*invScaleSq));
+         #else
+          vStoneWorldPos=(modelMatrix*vec4(transformed,1.0)).xyz;
+          vStreamMaskPos=vStoneWorldPos;
+          vec3 scaleSq=vec3(dot(modelMatrix[0].xyz,modelMatrix[0].xyz),dot(modelMatrix[1].xyz,modelMatrix[1].xyz),dot(modelMatrix[2].xyz,modelMatrix[2].xyz));
+          vec3 invScaleSq=1.0/max(vec3(0.0001),scaleSq);
+          vStoneWorldNorm=normalize(mat3(modelMatrix)*(normal*invScaleSq));
+         #endif`
       );
 
       shader.fragmentShader=
         'varying vec3 vStoneWorldPos;\n'+
         'varying vec3 vStoneWorldNorm;\n'+
+        'varying vec3 vStreamMaskPos;\n'+
         'uniform sampler2D uMicroDiff;\n'+
         'uniform sampler2D uMicroNormal;\n'+
         'uniform sampler2D uMicroRough;\n'+
@@ -194,7 +211,19 @@ export class World {
            diffuseColor.rgb*=mix(vec3(1.0),grain,0.48);
            float antiStretch=smoothstep(0.20,0.50,slope);
            vec3 slopeDetail=diffuseColor.rgb*mix(vec3(1.0),grain,0.50);
-           diffuseColor.rgb=mix(diffuseColor.rgb,slopeDetail,antiStretch*0.75);`
+           diffuseColor.rgb=mix(diffuseColor.rgb,slopeDetail,antiStretch*0.75);
+
+           // GH-36: only the stream-adjacent, air-side face of an authored
+           // field stone gets this correction. The slab and ordinary clearing
+           // stones remain unchanged; submerged streambed stones use their
+           // own untouched material path.
+           float streamCenter=-1.65+sin(vStreamMaskPos.z*0.18)*0.50;
+           float streamNear=1.0-smoothstep(0.66,1.22,abs(vStreamMaskPos.x-streamCenter));
+           float airFace=smoothstep(-0.080,0.010,vStreamMaskPos.y);
+           float streamAir=streamNear*airFace;
+           float paleAir=smoothstep(0.30,0.70,dot(diffuseColor.rgb,vec3(0.299,0.587,0.114)));
+           vec3 weatheredAir=mix(diffuseColor.rgb*vec3(0.50,0.47,0.42),grain*vec3(0.46,0.43,0.38),0.42);
+           diffuseColor.rgb=mix(diffuseColor.rgb,weatheredAir,streamAir*paleAir*0.94);`
         )
       );
 
@@ -223,40 +252,127 @@ export class World {
          reflectedLight.indirectDiffuse*=mix(1.0,mAO,0.40);
         `
       );
+
+      shader.fragmentShader=shader.fragmentShader.replace('#include <output_fragment>',`
+         float streamAirOutput=streamNear*airFace;
+         float paleOutput=smoothstep(0.34,0.70,dot(outgoingLight,vec3(0.299,0.587,0.114)));
+         vec3 weatheredOutput=mix(outgoingLight*vec3(0.52,0.49,0.45),outgoingLight*vec3(0.68,0.65,0.60),0.45);
+         outgoingLight=mix(outgoingLight,weatheredOutput,streamAirOutput*paleOutput*0.64);
+         #include <output_fragment>`);
     };
     m.customProgramCacheKey=()=>'slab-detail-pbr-2';
    this.slab.geometry=g;this.slab.material=m;this.slab.scale.set(1.62/size.x,.50/size.y,1.28/size.z);this.slab.position.set(0,-.165,.83);this.slab.rotation.set(0,0,0);
    this.slab.onBeforeRender=(_renderer,_scene,camera)=>{uViewRotation.value.setFromMatrix4(camera.matrixWorldInverse);};
    this.slab.updateMatrixWorld(true);const down=new T.Raycaster();const bagRestQ=new T.Quaternion().setFromEuler(new T.Euler(-1.453,-.0931,.9055));for(const [id,home]of Object.entries(this.home)){if(id==='bag'){let seat=null;for(const bx of[-.04,0,.04])for(const by of[.01,.05,.09,.12]){const lp=V(bx,by,-.017).applyQuaternion(bagRestQ);down.set(V(home.x+lp.x,2,home.z+lp.z),V(0,-1,0));const bhit=down.intersectObject(this.slab)[0];if(bhit)seat=Math.max(seat??-Infinity,bhit.point.y-lp.y);}if(seat!==null)home.y=seat-.004;continue;}down.set(V(home.x,2,home.z),V(0,-1,0));const hit=down.intersectObject(this.slab)[0];if(hit)home.y=hit.point.y+(id==='pipe'?.019:id==='lighter'?.016:id==='bottle'?.020:.001);}
-   sources.forEach((s,index)=>{
-    const geometry=(lods.get(s.name)??s).geometry.clone();geometry.computeBoundingBox();const bb=geometry.boundingBox,sz=bb.getSize(V()),c=bb.getCenter(V());geometry.translate(-c.x,-bb.min.y,-c.z);
-    const material=s.material.clone();material.roughness=.87;
-    const inst=new T.InstancedMesh(geometry,material,42);inst.name='Scanned creek stones';
-    const d=new T.Object3D();let count=0;
-    if(index===0){
-     const edgeCoords=[[-.55,.68],[.62,.74],[-.42,1.06],[.52,1.14],[0,1.20]];
-     for(const [ex,ez] of edgeCoords){
-      const gy=this.ground(ex,ez)-.04;
-      d.position.set(ex,gy,ez);
-      d.rotation.set(rand(-.1,.1),rand(0,6.28),0);
-      d.scale.setScalar(rand(.18,.32)/Math.max(sz.x,sz.z));
-      d.updateMatrix();
-      inst.setMatrixAt(count++,d.matrix);
-     }
-    }
-    for(let i=count;i<42;i++){
-     const z=rand(-18,14);const hw=this.streamWidth(z)*.5;const side=i%2?1:-1;
-     const x=this.streamX(z)+side*rand(hw*.85,hw*1.8);
-     const scale=rand(.14,.45)/Math.max(sz.x,sz.z);
-     if(inPropClearance(x,z,false,this.streamX(z),this.streamWidth(z)))continue;
-     const gy=this.ground(x,z)-scale*.25;
-     d.position.set(x,gy,z);d.rotation.set(0,rand(0,6.3),rand(-.1,.1));d.scale.setScalar(scale);d.updateMatrix();
-     inst.setMatrixAt(count++,d.matrix);
-    }
-    inst.count=count;inst.castShadow=true;inst.receiveShadow=true;this.scene.add(inst);
-   });
+    const authoredRocks=[
+     // Zone 1: Foreground / ground close-up (nestled in loam between player and slab)
+     [0.32,1.95,0.13,true],[-0.42,2.15,0.12,true],[0.68,2.25,0.15,true],
+     [-0.25,1.62,0.11,true],[0.45,1.55,0.14,true],[-0.58,1.88,0.16,true],
+     [0.12,2.28,0.10,true],[-0.15,2.45,0.09,true],
+     // Zone 2: Clearing perimeter & slab collar
+     [-0.55,0.68,0.22,false],[0.62,0.74,0.24,false],[-0.42,1.06,0.20,false],
+     [0.52,1.14,0.22,false],[0.0,1.22,0.18,false],[0.72,0.52,0.20,false],
+      [-0.92,0.92,0.16,false],[0.28,1.35,0.16,false],[0.95,0.55,0.25,false],
+     [1.35,1.15,0.28,false],[1.45,1.85,0.26,false],[0.82,1.28,0.22,false],
+      [-0.62,0.45,0.20,false],[-0.68,1.45,0.22,false],[1.65,2.15,0.25,false],
+      [-0.95,2.05,0.21,false],
+     // Zone 4: Midground knolls, nurse logs & slopes
+     [2.1,3.2,0.42,false],[3.4,1.5,0.45,false],[1.6,-1.4,0.38,false],
+     [-3.6,2.2,0.44,false],[-1.5,4.2,0.40,false],[2.8,-0.6,0.46,false],
+     [3.6,2.8,0.48,false],[2.4,4.2,0.38,false],[-4.1,1.2,0.42,false],
+     [-3.8,3.4,0.45,false]
+    ];
+    upgradeStreambedGeometries(this, sources, lods);
+
+    // GH-36: only field-stone instances that physically cross the creek lip
+    // receive the full-resolution source mesh. The matrices are built once
+    // below and copied unchanged into the two batches, so this split changes
+    // topology/texture fidelity without moving, resizing, or reshaping any
+    // existing stone. Land-only stones retain their lighter LOD path.
+    const crossesCreekLip=(x,z,targetSize)=>{
+     const center=creekX(z)+creekBankMeander(z);
+     const half=creekWidth(z)*.5;
+     return Math.abs(x-center)<=half+Math.max(.18,targetSize*.72)&&this.ground(x,z)<.06;
+    };
+
+    sources.forEach((s,index)=>{
+     const d=new T.Object3D();let count=0;
+     const streamMatrices=[],landMatrices=[],refillBankHeroAMatrices=[],refillBankHeroBMatrices=[];
+     const lodReference=(lods.get(s.name)??s).geometry;
+     lodReference.computeBoundingBox();
+     const lodReferenceSize=lodReference.boundingBox.getSize(V());
+     const lodReferenceMax=Math.max(lodReferenceSize.x,lodReferenceSize.z);
+
+      // Distribute authored field stones across the 6 rock variants
+      for(let k=0;k<authoredRocks.length;k++){
+       if(k%sources.length!==index)continue;
+       const [x,z,targetSize,isCloseUp]=authoredRocks[k];
+       const sz=lodReferenceSize,maxSz=lodReferenceMax;
+       const scale=targetSize/maxSz;
+       const eps=0.15;
+       const slopeX=(this.ground(x+eps,z)-this.ground(x-eps,z))/(2*eps);
+       const slopeZ=(this.ground(x,z+eps)-this.ground(x,z-eps))/(2*eps);
+       const rxJitter=rand(-0.06,0.06);
+       const yaw=rand(0,Math.PI*2);
+       const rzJitter=rand(-0.06,0.06);
+       const aspect=rand(0.92,1.18);
+       const yAspect=rand(0.88,1.12);
+
+       const norm=new T.Vector3(-slopeX,1.0,-slopeZ).normalize();
+       const qYaw=new T.Quaternion().setFromAxisAngle(V(0,1,0),yaw);
+       const qAlign=new T.Quaternion().setFromUnitVectors(V(0,1,0),norm);
+       const qWobble=new T.Quaternion().setFromEuler(new T.Euler(rxJitter,0,rzJitter));
+       d.quaternion.copy(qAlign).multiply(qYaw).multiply(qWobble);
+
+       const gy=this.ground(x,z)-scale*sz.y*(isCloseUp?0.48:0.54);
+       d.position.set(x,gy,z);
+       d.scale.set(scale*aspect,scale*yAspect,scale/aspect);
+       d.updateMatrix();
+       // STREAM-BED-01: these are the two refill-visible source-2 bank rocks
+       // that read as pale/smooth in the current top-down and refill views.
+       // Keep their authored transforms exactly, but route them to a dedicated
+       // high-detail batch below instead of the ordinary clearing LOD batch.
+       if(k===8)refillBankHeroAMatrices.push(d.matrix.clone());
+       else if(k===20)refillBankHeroBMatrices.push(d.matrix.clone());
+       else (crossesCreekLip(x,z,targetSize)?streamMatrices:landMatrices).push(d.matrix.clone());
+      }
+     const makeBatch=(matrices,useLod,label,sourceOverride=null,heroBank=false,heroColor='#73716a')=>{
+      if(!matrices.length)return;
+      const sourceMesh=sourceOverride??((useLod?lods.get(s.name):null)??s);
+      const geometry=sourceMesh.geometry.clone();geometry.computeBoundingBox();
+      const rawSize=geometry.boundingBox.getSize(V());
+      // Match the previous LOD's extents before translating the full scan;
+      // only vertex density/detail changes, never the authored footprint.
+      geometry.scale(lodReferenceSize.x/rawSize.x,lodReferenceSize.y/rawSize.y,lodReferenceSize.z/rawSize.z);
+      geometry.computeBoundingBox();const bb=geometry.boundingBox,c=bb.getCenter(V());geometry.translate(-c.x,-bb.min.y,-c.z);
+      // Both batches share the same 4K photogrammetry material family as the
+      // ritual slab; only the creek-crossing batch gets the full mesh source.
+      const material=m.clone();material.roughness=.88;
+      if(heroBank){
+       material.color.set(heroColor);
+       material.normalScale.set(1.72,1.72);
+       material.roughness=.82;
+       material.envMapIntensity=.90;
+      }
+      const inst=new T.InstancedMesh(geometry,material,matrices.length);inst.name=label;
+      inst.onBeforeRender=(_renderer,_scene,camera)=>{uViewRotation.value.setFromMatrix4(camera.matrixWorldInverse);};
+      matrices.forEach((matrix,i)=>inst.setMatrixAt(i,matrix));
+      inst.instanceMatrix.needsUpdate=true;inst.castShadow=true;inst.receiveShadow=true;this.scene.add(inst);
+     };
+     makeBatch(streamMatrices,false,'Scanned creek-crossing stones • full resolution');
+     makeBatch(landMatrices,true,'Scanned clearing stones');
+     makeBatch(refillBankHeroAMatrices,false,'Scanned refill-bank stone A • high detail',sources[0]??s,true,'#6d706a');
+     makeBatch(refillBankHeroBMatrices,false,'Scanned refill-bank stone B • high detail',sources[1]??sources[0]??s,true,'#756d63');
+    });
   }
+ // --- HERO PROPS INTERMEDIATE GLB IMPORT ---
+ // NOTE (GH-43 ARCHITECTURAL AUDIT):
+ // upgradeBottle() and upgradePipe() import legacy GLB assets ('bottle.glb' and 'pipe.glb').
+ // These imported models are COMPLETELY SUPERSEDED and stripped out when upgradeHeroProps(this)
+ // runs at the end of loadAssets(), replacing them with the authoritative procedural meshes in props.js.
+ // upgradeLighter() imports 'clipper.glb', from which only the lower chassis is retained by props.js:correctLighter().
  upgradeBottle(model){
+  // [SUPERSEDED AT RUNTIME by props.js:rebuildBottle()]
   const keep=new Set([this.liquid.volume,this.bottleSmoke,this.spareCap,this.outlet]);
   for(const child of [...this.items.bottle.children])if(!keep.has(child)){
    this.items.bottle.remove(child);
@@ -286,6 +402,7 @@ export class World {
   this.outlet.position.set(.0326,.032,0);
  }
  upgradePipe(model){
+  // [SUPERSEDED AT RUNTIME by props.js:rebuildPipe()]
   if(this.pipeGlass){
    this.items.pipe.remove(this.pipeGlass);
    const idx=this.interactive.indexOf(this.pipeGlass);if(idx>=0)this.interactive.splice(idx,1);
@@ -309,6 +426,7 @@ export class World {
   this.hotTip.position.set(0,-.015,0);
  }
  upgradeLighter(model){
+  // [HYBRID AT RUNTIME: Lower chassis retained from clipper.glb; head assembly replaced by props.js:correctLighter()]
    const keep=new Set([this.flame,this.flameCore,this.flameLight]);for(const child of [...this.items.lighter.children])if(!keep.has(child)){this.items.lighter.remove(child);child.traverse(o=>{const i=this.interactive.indexOf(o);if(i>=0)this.interactive.splice(i,1);});}
    this.items.lighter.add(model);
    model.rotation.y = Math.PI;
@@ -318,6 +436,11 @@ export class World {
    this.nozzle=V(-.003,.072,.002);this.flame.geometry=new T.PlaneGeometry(.016,.036);this.flame.geometry.translate(0,.018,0);this.flame.material=flameMaterial();this.flame.scale.setScalar(1);this.flameShader=true;
  }
   makeObjects(){
+   // NOTE (GH-43 ARCHITECTURAL AUDIT):
+   // makeObjects() creates synchronous startup fallback representations so items.bottle,
+   // items.pipe, and items.lighter exist with valid groups/anchors before asynchronous asset
+   // loading finishes. These fallback meshes are [SUPERSEDED AT RUNTIME] when loadAssets()
+   // and props.js:upgradeHeroProps() complete.
    const petMat=new T.MeshPhysicalMaterial({color:'#f8fcfa',roughness:.17,transmission:.94,thickness:.0003,ior:1.51,transparent:true,opacity:.93,envMapIntensity:.82,side:T.DoubleSide,depthWrite:false});this.petMat=petMat;
    const bottle=new T.Group();this.scene.add(bottle);bottle.name='bottle';bottle.position.set(-.02,.294,.78);bottle.scale.set(1,1,1);this.items.bottle=bottle;
    const profile=[[0,.003],[.022,.003],[.032,.016],[.0325,.032],[.0325,.050],[.0312,.053],[.0325,.056],[.0322,.060],[.0322,.126],[.0310,.129],[.0325,.132],[.0310,.136],[.0325,.139],[.0322,.148],[.0305,.162],[.0265,.178],[.0205,.192],[.0145,.202],[.0135,.206],[.0152,.207],[.0152,.209],[.0135,.210],[.0132,.214],[.0142,.216],[.0132,.218],[.0142,.220],[.0132,.222],[.0130,.226],[.0118,.226],[0,.226]];
@@ -374,9 +497,11 @@ export class World {
    this.trash.traverse(o=>{o.userData.item='bag';if(o.isMesh)this.interactive.push(o);});
   }
   makeParticles(){
-   const count=180,arr=new Float32Array(count*3);for(let i=0;i<count;i++)arr.set([rand(-7,7),rand(.15,3),rand(-7,4)],i*3);const geo=new T.BufferGeometry();geo.setAttribute('position',new T.BufferAttribute(arr,3));
-   const dot=canvasTexture((c,w,h)=>{const g=c.createRadialGradient(w/2,h/2,0,w/2,h/2,w/2);g.addColorStop(0,'rgba(255,255,220,1)');g.addColorStop(1,'rgba(255,255,220,0)');c.fillStyle=g;c.fillRect(0,0,w,h);},32,32);
-   this.pollen=new T.Points(geo,new T.PointsMaterial({color:'#f1ead0',size:.018,map:dot,transparent:true,opacity:.46,depthWrite:false}));this.scene.add(this.pollen);
+   // Retain the original 180 * 3 RNG draws so rain and every later
+   // deterministic placement retain their established seeds. Atmosphere owns
+   // the per-particle motion and light-aware dust shader.
+   const count=180,arr=new Float32Array(count*3);for(let i=0;i<count;i++)arr.set([rand(-7,7),rand(.15,3),rand(-7,4)],i*3);
+   this.pollen=this.atmosphere.createPollen(arr);
    const rainGeo=new T.BufferGeometry(),rp=new Float32Array(600*3);for(let i=0;i<600;i++)rp.set([rand(-8,8),rand(0,7),rand(-8,5)],i*3);rainGeo.setAttribute('position',new T.BufferAttribute(rp,3));this.rain=new T.Points(rainGeo,new T.PointsMaterial({color:'#c0d2d1',size:.023,transparent:true,opacity:.42}));this.scene.add(this.rain);this.rain.visible=false;
   }
   setQuality(value){
@@ -389,8 +514,9 @@ export class World {
    this.renderer.shadowMap.needsUpdate=true;
    this._shadowState=null;
    this.renderer.setSize(innerWidth,innerHeight);
+   this.atmosphere?.setQuality(value);
   }
-  resize(){this.camera.aspect=innerWidth/innerHeight;this.camera.updateProjectionMatrix();this.renderer.setSize(innerWidth,innerHeight);}
+  resize(){this.camera.aspect=innerWidth/innerHeight;this.camera.updateProjectionMatrix();this.renderer.setSize(innerWidth,innerHeight);this.atmosphere?.resize();}
   look(dx,dy){this.yaw-=dx*.003;this.pitch=T.MathUtils.clamp(this.pitch-dy*.003,-1.15,.8);}
   screen(point){const v=point.clone().project(this.camera);return{x:(v.x*.5+.5)*innerWidth,y:(-.5*v.y+.5)*innerHeight,visible:v.z>=-1&&v.z<=1};}
   hitTest(x,y,sim){
@@ -457,8 +583,8 @@ export class World {
    for(const shader of this.windMats){shader.uniforms.uTime.value=this.time;shader.uniforms.uWind.value=settings.wind;}
    updateEnvironment(this,dt,sim,settings);
    for(const r of this.ripples){const t=(this.time*.36+r.userData.phase)%1;r.scale.setScalar(1+t*5);r.material.opacity=(1-t)*.11;r.position.z+=dt*.09;if(r.position.z>4)r.position.z=-6;r.position.x=this.streamX(r.position.z)+Math.sin(r.userData.phase*35)*.25;}
+   this.atmosphere?.update(dt,settings);
    const storm=settings.weather==='rain';
-   this.pollen.rotation.y=Math.sin(this.time*.02)*.08;this.pollen.position.x=Math.sin(this.time*.1)*.06*settings.wind;
    if(storm){const pos=this.rain.geometry.attributes.position;for(let i=0;i<pos.count;i++){let y=pos.getY(i)-dt*3.7;if(y<0)y=7;pos.setY(i,y);}pos.needsUpdate=true;}
 
    this.scene.updateMatrixWorld(true);
@@ -508,7 +634,7 @@ export class World {
     }
    }
   }
-  render(){this.checkShadowUpdate();this.renderer.render(this.scene,this.camera);}
+  render(){this.checkShadowUpdate();this.stream.userData.renderScene(this.renderer,this.scene,this.camera);this.finalEdges.render(this.renderer);}
  async enablePathTracing(){
   if(this.pathTracer)return;
   const {WebGLPathTracer}=await import('three-gpu-pathtracer');

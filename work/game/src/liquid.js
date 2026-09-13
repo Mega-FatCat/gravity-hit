@@ -1,12 +1,15 @@
 import * as T from 'three';
-const radius=y=>y<.145?.0294:T.MathUtils.lerp(.0294,.012,T.MathUtils.smoothstep(y,.145,.215));
+const radius=y=>y<.151?.0320:T.MathUtils.lerp(.0320,.0118,T.MathUtils.smoothstep(y,.151,.208));
 export class Liquid {
  constructor(bottle,scene){
   this.bottle=bottle;this.plane=new T.Plane(new T.Vector3(0,-1,0),0);this.inverse=new T.Matrix4();this.localWaterPlane=new T.Vector4(0,1,0,-.006);
-  const profile=[[0,.006],[.022,.006],[.0294,.020],[.0294,.145],[.026,.175],[.019,.195],[.012,.215],[0,.215]].map(v=>new T.Vector2(...v));
-  const material=new T.MeshPhysicalMaterial({color:'#bfd3c4',roughness:.075,transmission:.35,thickness:.026,ior:1.333,transparent:true,opacity:.26,depthWrite:false,side:T.FrontSide,clippingPlanes:[this.plane],envMapIntensity:.32});
+  const profile=[
+   [0,.007],[.022,.007],[.025,.003],[.028,.005],[.0305,.011],[.0318,.023],[.0320,.036],[.0318,.058],
+   [.0318,.120],[.0320,.145],[.029,.165],[.024,.185],[.018,.195],[.012,.205],[.0115,.218],[0,.218]
+  ].map(v=>new T.Vector2(...v));
+  const material=new T.MeshPhysicalMaterial({color:'#a8dcd4',roughness:.03,transmission:.78,thickness:.048,ior:1.333,transparent:true,opacity:.72,depthWrite:false,side:T.DoubleSide,clippingPlanes:[this.plane],envMapIntensity:.95});
   this.volume=new T.Mesh(new T.LatheGeometry(profile,64),material);this.volume.renderOrder=1;bottle.add(this.volume);
-  const surfaceMat=new T.MeshPhysicalMaterial({color:'#1a2e22',roughness:.28,metalness:.0,transparent:true,opacity:.14,depthWrite:false,side:T.DoubleSide,envMapIntensity:.06});
+  const surfaceMat=new T.MeshPhysicalMaterial({color:'#b5e4dc',roughness:.02,metalness:.0,transparent:true,opacity:.65,depthWrite:false,side:T.DoubleSide,envMapIntensity:1.1});
   surfaceMat.onBeforeCompile=shader=>{
    shader.uniforms.uBottleInverse={value:this.inverse};
    shader.vertexShader='varying vec3 vLiquidWorld;\n'+shader.vertexShader;
@@ -14,12 +17,13 @@ export class Liquid {
    shader.fragmentShader='uniform mat4 uBottleInverse;varying vec3 vLiquidWorld;\n'+shader.fragmentShader;
    shader.fragmentShader=shader.fragmentShader.replace('#include <clipping_planes_fragment>',`#include <clipping_planes_fragment>
 vec3 localLiquid=(uBottleInverse*vec4(vLiquidWorld,1.)).xyz;
-float r=mix(.0294,.012,smoothstep(.145,.215,localLiquid.y));
-if(localLiquid.y<.006||localLiquid.y>.215||length(localLiquid.xz)>r)discard;
+float r=localLiquid.y<.151?.0320:mix(.0320,.0118,smoothstep(.151,.208,localLiquid.y));
+if(localLiquid.y<.005||localLiquid.y>.218||length(localLiquid.xz)>r)discard;
 float distNorm=length(localLiquid.xz)/max(.001,r);
-float meniscus=smoothstep(.80,.98,distNorm);
-diffuseColor.rgb=mix(vec3(.04,.10,.07),vec3(.10,.18,.13),meniscus);
-diffuseColor.a=mix(.015,.18,meniscus);`);
+float meniscus=smoothstep(.80,.995,distNorm);
+float surfaceGrazing=pow(1.-abs(dot(normalize(vNormal),normalize(vViewPosition))),2.2);
+diffuseColor.rgb=mix(vec3(.72,.88,.84),vec3(.90,.98,.96),meniscus);
+diffuseColor.a=mix(.18,.82,max(meniscus,surfaceGrazing*.7));`);
   };
   this.surface=new T.Mesh(new T.PlaneGeometry(.4,.4),surfaceMat);this.surface.rotation.x=-Math.PI/2;this.surface.renderOrder=2;scene.add(this.surface);
   // Equal-volume sample positions determine a level surface at any bottle tilt.

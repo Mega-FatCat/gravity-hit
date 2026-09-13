@@ -148,5 +148,32 @@
     "source": "https://polyhaven.com/a/sandy_gravel",
     "license": "CC0",
     "resolution": "2k"
+  },
+  {
+    "id": "bottle_glb",
+    "source": "Local Blender script: work/build_bottle.py",
+    "file": "bottle.glb",
+    "license": "Project-authored",
+    "runtimeStatus": "[SUPERSEDED AT RUNTIME]",
+    "runtimeSourceOfTruth": "work/game/src/props.js -> rebuildBottle()",
+    "notes": "Loaded during asset initialization but completely unlinked and replaced by high-fidelity procedural PET bottle in props.js."
+  },
+  {
+    "id": "pipe_glb",
+    "source": "Local Blender script: work/build_pipe.py",
+    "file": "pipe.glb",
+    "license": "Project-authored",
+    "runtimeStatus": "[SUPERSEDED AT RUNTIME]",
+    "runtimeSourceOfTruth": "work/game/src/props.js -> rebuildPipe()",
+    "notes": "Loaded during asset initialization but completely unlinked and replaced by high-fidelity slim borosilicate chillum and dynamic resin canvas in props.js."
+  },
+  {
+    "id": "clipper_glb",
+    "source": "Local Blender script: work/build_hero.py and work/clipper.blend",
+    "file": "clipper.glb",
+    "license": "Project-authored",
+    "runtimeStatus": "[HYBRID: PARTIALLY ACTIVE CHASSIS]",
+    "runtimeSourceOfTruth": "work/game/src/props.js -> correctLighter()",
+    "notes": "Only lower chassis meshes ('Body', 'Base mould seam', 'Refill valve', 'Refill valve recess', 'Upper collar') are retained; top assembly (wheel, flint, shield, lever, nozzle) and wrap are procedurally built in props.js."
   }
 ]

@@ -11,7 +11,7 @@ app.commandLine.appendSwitch('disable-features','CalculateNativeWinOcclusion');
 let win;
 app.whenReady().then(async()=>{
  session.defaultSession.setPermissionRequestHandler((wc,permission,callback)=>callback(false));
- win=new BrowserWindow({width:1440,height:900,minWidth:960,minHeight:640,backgroundColor:'#142016',show:!qa,focusable:!benchmark,autoHideMenuBar:true,title:'STILLWATER',webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false,offscreen:qa&&!benchmark}});
+ win=new BrowserWindow({width:1440,height:900,minWidth:960,minHeight:640,backgroundColor:'#142016',show:!qa,focusable:!benchmark,autoHideMenuBar:true,title:'ZNICZ',webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false,offscreen:qa&&!benchmark}});
  if(qa&&!benchmark)win.webContents.setFrameRate(60);
  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  win.webContents.on('will-navigate',(e,url)=>{if(!url.startsWith('file://')&&!url.startsWith('http://127.0.0.1:5173'))e.preventDefault();});
