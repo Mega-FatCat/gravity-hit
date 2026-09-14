@@ -1016,9 +1016,9 @@ export function updateEnvironment(world,dt,sim,settings){
   world.forestSky.material.uniforms.horizon.value.copy(world.scene.fog.color);
   world.forestSky.material.uniforms.zenith.value.set(storm?'#687977':mist?'#a4b1a9':morning?'#a0bed2':'#8da8bc');
   world.scene.fog.near=storm?10:mist?5:20;world.scene.fog.far=storm?46:mist?36:64;
- world.sun.intensity=storm?.65:mist?1.05:morning?1.8:2.05;
+ world.sun.intensity=storm?.65:mist?1.05:morning?2.8:3.8;
  world.renderer.toneMappingExposure=storm?.87:.94;
- if(world.forestHemisphere)world.forestHemisphere.intensity=storm?.95:1.4;
+ if(world.forestHemisphere)world.forestHemisphere.intensity=storm?.95:mist?1.4:1.05;
  if(world.rain)world.rain.visible=storm;
  // Keep the established water appearance and slow only its animation clock.
  // Geometry and normal-map wavelengths/amplitudes stay unchanged.

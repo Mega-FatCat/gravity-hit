@@ -8,11 +8,72 @@ import * as T from 'three';
 const V=(x=0,y=0,z=0)=>new T.Vector3(x,y,z);
 const WHITE_PIXEL=new Uint8Array([255,255,255,255]);
 
-const QUALITY={
+export const ATMOSPHERE_QUALITY=Object.freeze({
  low:{scale:0,samples:0},
- medium:{scale:1/3,samples:24},
- high:{scale:.5,samples:40},
-};
+ medium:{scale:1/3,samples:40},
+ high:{scale:.5,samples:64},
+});
+const QUALITY=ATMOSPHERE_QUALITY;
+
+// Keep the CPU contract and the generated GLSL on the same physical knobs.
+// Single-scattering albedo stays below one. The existing scene fog still owns
+// background attenuation; this pass adds the integrated sun radiance.
+export const ATMOSPHERE_PHYSICS=Object.freeze({
+ clipDistance:.05,
+ extinction:.025,
+ albedo:.74,
+ heightReference:.15,
+ heightFalloff:.48,
+ distanceFalloff:.032,
+ samplePower:1.38,
+ });
+
+// These points are generated inside this module so the original world RNG
+// stream and its 180 authored positions remain untouched. They are small,
+// player-near understory dust particles, rather than a second visual effect.
+export const SUPPLEMENTARY_POLLEN_COUNT=420;
+
+function stableUnit(index,salt){
+ const value=Math.sin((index+1)*12.9898+salt*78.233)*43758.5453;
+ return value-Math.floor(value);
+}
+
+const MEDIUM_FIELD_GLSL=`
+float atmoHash3(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
+float atmoNoise3(vec3 p){
+ vec3 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+ float n000=atmoHash3(i),n100=atmoHash3(i+vec3(1,0,0)),n010=atmoHash3(i+vec3(0,1,0)),n110=atmoHash3(i+vec3(1,1,0));
+ float n001=atmoHash3(i+vec3(0,0,1)),n101=atmoHash3(i+vec3(1,0,1)),n011=atmoHash3(i+vec3(0,1,1)),n111=atmoHash3(i+vec3(1,1,1));
+ return mix(mix(mix(n000,n100,f.x),mix(n010,n110,f.x),f.y),mix(mix(n001,n101,f.x),mix(n011,n111,f.x),f.y),f.z);
+}
+float atmoMediumField(vec3 p){
+ float broad=atmoNoise3(p*vec3(.12,.09,.12)+vec3(3.0,-.5,9.0));
+ float detail=atmoNoise3(p*vec3(.28,.22,.28)-vec3(7.0,2.0,4.0));
+ return clamp(.82+.30*(broad-.5)+.10*(detail-.5),.48,1.10);
+}
+`;
+
+// Small CPU-side contract used by the unit suite to guard the physical intent
+// of the shader: after the 5 cm camera clip, a short ground-level path still
+// has non-zero in-scattering. The live integration uses the same sigma values
+// and segment layout in GLSL.
+export function atmospherePathScattering(distance,samples=40){
+ const d=Math.max(0,Number(distance)||0),count=Math.max(1,Math.floor(samples));
+ const clip=Math.min(ATMOSPHERE_PHYSICS.clipDistance,d),path=Math.max(0,d-clip);
+ if(path<=0)return 0;
+ let transmittance=1,scattered=0;
+ for(let i=0;i<count;i++){
+  const u0=i/count,u1=(i+1)/count;
+  const t0=clip+path*Math.pow(u0,ATMOSPHERE_PHYSICS.samplePower),t1=clip+path*Math.pow(u1,ATMOSPHERE_PHYSICS.samplePower);
+  const t=.5*(t0+t1),segment=Math.max(.0001,t1-t0);
+  const sigmaT=ATMOSPHERE_PHYSICS.extinction*Math.exp(-t*ATMOSPHERE_PHYSICS.distanceFalloff),sigmaS=sigmaT*ATMOSPHERE_PHYSICS.albedo;
+  const segmentTrans=Math.exp(-sigmaT*segment);
+  const scatterWeight=(1-segmentTrans)*(sigmaS/Math.max(.00001,sigmaT));
+  scattered+=transmittance*scatterWeight*.62;
+  transmittance*=segmentTrans;
+ }
+ return scattered;
+}
 
 const PACKED_DEPTH_GLSL=`
 const float ATMO_UNPACK_DOWNSCALE = 255.0 / 256.0;
@@ -60,12 +121,14 @@ vec3 atmoWorldFromClip(vec3 clip){
  return (uCameraWorld*p).xyz;
 }
 
+${MEDIUM_FIELD_GLSL}
+
 // The map is the same RGBA packed depth representation used by Three r180's
 // shadowmap_pars_fragment chunk. A five tap PCF footprint is enough to soften
 // shafts at the existing PCFSoft shadow-map resolution without multiplying the
 // full 17-tap surface-lighting lookup across every ray step.
 vec2 atmoShadowVisibility(vec3 worldPosition){
- if(uHasShadow<.5)return vec2(0.0);
+ if(uHasShadow<.5)return vec2(.62);
  vec4 sc=uShadowMatrix*vec4(worldPosition,1.0);
  sc.xyz/=max(.000001,sc.w);
  vec2 uv=sc.xy;
@@ -110,25 +173,46 @@ void main(){
   sceneDistance=min(uMaxDistance,max(.05,distance(rayOrigin,scenePoint)));
   sceneDepthMetric=clamp(-atmoPerspectiveDepthToViewZ(rawDepth,uCameraRange.x,uCameraRange.y)/max(.001,uCameraRange.y),0.0,1.0);
  }
- float stepLength=sceneDistance/float(${samples});
+ float clipDistance=min(${ATMOSPHERE_PHYSICS.clipDistance.toFixed(3)},sceneDistance);
+ float pathDistance=max(0.0,sceneDistance-clipDistance);
+ float mediumEnabled=step(.000001,pathDistance);
  float optical=0.0;
  vec3 scattered=vec3(0.0);
  // Fixed midpoint samples are intentional: camera movement must not produce
  // temporal shimmer in the shafts or a noisy, animated sky.
  for(int i=0;i<${samples};i++){
-  float t=(float(i)+.5)*stepLength;
+  float u0=float(i)/float(${samples});
+  float u1=float(i+1)/float(${samples});
+  // A power-law parameterization spends more samples in the first few metres
+  // where the player sees ground, stream edges and inter-shrub air columns.
+  float t0=clipDistance+pathDistance*pow(u0,${ATMOSPHERE_PHYSICS.samplePower.toFixed(2)});
+  float t1=clipDistance+pathDistance*pow(u1,${ATMOSPHERE_PHYSICS.samplePower.toFixed(2)});
+  float t=.5*(t0+t1);
+  float segmentLength=max(.0001,t1-t0);
   vec3 p=rayOrigin+rayDirection*t;
-  float heightDensity=exp(-max(p.y-.12,0.0)*.17);
-  float distanceFade=exp(-t*.032);
+  float heightDensity=exp(-max(p.y-${ATMOSPHERE_PHYSICS.heightReference.toFixed(2)},0.0)*${ATMOSPHERE_PHYSICS.heightFalloff.toFixed(2)});
+  float distanceFade=exp(-t*${ATMOSPHERE_PHYSICS.distanceFalloff.toFixed(3)});
+  float aerosol=atmoMediumField(p);
   vec2 shadow=atmoShadowVisibility(p);
-  float density=(.0025+.038*shadow.y)*heightDensity*distanceFade*smoothstep(.8,3.5,t);
-  float sampleAlpha=1.0-exp(-density*stepLength);
+  // Aerosol exists continuously in ground and canopy air. Shadows only
+  // modulate the light reaching it, so downward and side-lit rays retain a
+  // coherent short-path presence instead of disappearing in gaps.
+  float sigmaT=${ATMOSPHERE_PHYSICS.extinction.toFixed(4)}*aerosol*heightDensity*distanceFade;
+  float sigmaS=sigmaT*${ATMOSPHERE_PHYSICS.albedo.toFixed(2)};
   float phaseCos=dot(rayDirection,uSunDirection);
-  float phase=.15+.85*pow(max(phaseCos,0.0),4.0);
-  float direct=shadow.x;
+  float g=.20;
+  float hg=(1.0-g*g)/pow(max(.001,1.0+g*g-2.0*g*phaseCos),1.5);
+  float phase=mix(1.0,hg,.50);
+  float gapLight=shadow.y;
+  // The clearing immediately around the camera is broadly sunlit. Keep that
+  // contribution quiet so it cannot veil every tree; the existing light-space
+  // canopy-gap contrast carries the visible shafts farther along each ray.
+  float direct=clamp(.008+shadow.x*.13+gapLight*.85,0.0,1.0);
+  float segmentTrans=exp(-sigmaT*segmentLength);
+  float scatterWeight=(1.0-segmentTrans)*(sigmaS/max(.00001,sigmaT))*mediumEnabled;
   vec3 tint=uSunColor*uSunIntensity;
-  scattered+=(1.0-optical)*sampleAlpha*tint*phase*direct;
-  optical+=sampleAlpha*(1.0-optical);
+  scattered+=(1.0-optical)*scatterWeight*tint*phase*direct;
+  optical=1.0-segmentTrans*(1.0-optical);
  }
 
  gl_FragColor=vec4(scattered,sceneDepthMetric);
@@ -245,16 +329,32 @@ export class Atmosphere {
  resize(){this._resizeTarget(true);}
 
  createPollen(positionArray){
-  const count=positionArray.length/3;
+  const source=positionArray instanceof Float32Array?positionArray:Float32Array.from(positionArray);
+  const originalCount=source.length/3;
+  const count=originalCount+SUPPLEMENTARY_POLLEN_COUNT;
+  const positions=new Float32Array(count*3);positions.set(source);
+  for(let i=0;i<SUPPLEMENTARY_POLLEN_COUNT;i++){
+   const j=originalCount+i;
+   // Keep the additions close to the play space and concentrate them below
+   // head height, where a few illuminated points read as dust between shrubs.
+   positions[j*3]=(stableUnit(i,11.17)-.5)*6.8;
+   positions[j*3+1]=.15+1.65*Math.pow(stableUnit(i,23.71),1.45);
+   positions[j*3+2]=-1.8+stableUnit(i,37.29)*6.2;
+  }
   const geometry=new T.BufferGeometry();
-  geometry.setAttribute('position',new T.Float32BufferAttribute(positionArray,3));
+  geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));
   const sizes=new Float32Array(count),phases=new Float32Array(count);
   for(let i=0;i<count;i++){
    // Deterministic variation keeps the particles calm and avoids touching the
    // shared world placement RNG used by rain, foliage and streambed assets.
-   const h=Math.sin(i*12.9898+78.233)*43758.5453;
-   const f=h-Math.floor(h);
-   sizes[i]=.010+.012*f;phases[i]=(Math.sin(i*7.123+1.7)*.5+.5)*Math.PI*2;
+   if(i<originalCount){
+    const h=Math.sin(i*12.9898+78.233)*43758.5453;
+    const f=h-Math.floor(h);
+    sizes[i]=.010+.012*f;phases[i]=(Math.sin(i*7.123+1.7)*.5+.5)*Math.PI*2;
+   }else{
+    const f=stableUnit(i,78.233);
+    sizes[i]=.007+.008*f;phases[i]=stableUnit(i,41.63)*Math.PI*2;
+   }
   }
   geometry.setAttribute('aSize',new T.Float32BufferAttribute(sizes,1));
   geometry.setAttribute('aPhase',new T.Float32BufferAttribute(phases,1));
@@ -270,7 +370,7 @@ uniform sampler2D uShadowMap;uniform mat4 uShadowMatrix;uniform vec2 uShadowMapS
 varying float vIllum;
 ${PACKED_DEPTH_GLSL}
 float pollenShadow(vec3 p){
- if(uHasShadow<.5)return .72;
+ if(uHasShadow<.5)return .62;
  vec4 sc=uShadowMatrix*vec4(p,1.0);sc.xyz/=max(.000001,sc.w);
  if(sc.x<0.0||sc.x>1.0||sc.y<0.0||sc.y>1.0||sc.z<0.0||sc.z>1.0)return 0.0;
  float stored=atmoUnpackRGBAToDepth(texture2D(uShadowMap,sc.xy));
@@ -278,6 +378,7 @@ float pollenShadow(vec3 p){
  float edge=min(min(sc.x,1.0-sc.x),min(sc.y,1.0-sc.y));
  return lit*smoothstep(.015,.12,edge);
 }
+${MEDIUM_FIELD_GLSL}
 void main(){
  vec3 p=position;
  float phase=aPhase;
@@ -290,14 +391,16 @@ void main(){
  gl_PointSize=clamp(aSize*(260.0/max(.1,-viewPosition.z)),.7,3.5);
  float shadow=pollenShadow(worldPosition.xyz);
  float upLight=max(.0,uSunDirection.y);
- vIllum=.22+.78*shadow*upLight;
+ float field=atmoMediumField(worldPosition.xyz);
+ float lightResponse=.22+.78*(.22+.78*shadow)*(.70+.30*upLight);
+ vIllum=clamp(lightResponse*field,.12,1.0);
 }
 `,
    fragmentShader:`
 varying float vIllum;
 void main(){
  float d=length(gl_PointCoord-vec2(.5));
- float alpha=(1.0-smoothstep(.08,.5,d))*.32*vIllum;
+ float alpha=(1.0-smoothstep(.08,.5,d))*.42*vIllum;
  if(alpha<.012)discard;
  gl_FragColor=vec4(vec3(.92,.86,.62)*(.72+.28*vIllum),alpha);
  #include <colorspace_fragment>
@@ -305,6 +408,7 @@ void main(){
 `,transparent:true,depthWrite:false,depthTest:true,toneMapped:false,
   });
   const points=new T.Points(geometry,material);points.name='Individual forest dust';points.frustumCulled=false;
+  points.userData.originalPollenCount=originalCount;points.userData.supplementaryPollenCount=SUPPLEMENTARY_POLLEN_COUNT;
   this.world.scene.add(points);this.pollen=points;this._pollenData=geometry.attributes.position.array;
   return points;
  }
@@ -426,9 +530,10 @@ void main(){
    float sunDistance=length((vUv-atmosphereSunUV)*vec2(atmosphereSunAspect,1.0))*2.0*atmosphereTanHalfFov;
    float edgeWidth=max(fwidth(sunDistance),.0001);
    float disc=1.0-smoothstep(.00465-edgeWidth,.00465+edgeWidth,sunDistance);
-   float halo=exp(-sunDistance*sunDistance/(.022*.022));
+   float haloCore=exp(-sunDistance*sunDistance/(.055*.055));
+   float haloVeil=exp(-sunDistance*sunDistance/(.14*.14));
    float edgeFade=smoothstep(0.0,.035,min(min(atmosphereSunUV.x,1.0-atmosphereSunUV.x),min(atmosphereSunUV.y,1.0-atmosphereSunUV.y)));
-   atmosphericAdd+=atmosphereSunColor*atmosphereSunIntensity*(disc*2.0*step(.999999,opaqueDepth)+halo*.025*sunSky)*edgeFade;
+   atmosphericAdd+=atmosphereSunColor*atmosphereSunIntensity*(disc*2.0*step(.999999,opaqueDepth)+(haloCore*.42+haloVeil*.065)*sunSky)*edgeFade;
   }
  }
  vec4 sceneColor=texture2D(color,vUv);
@@ -466,6 +571,8 @@ void main(){
    shadowMapAvailable:!!sun?.shadow?.map?.texture,
    depthAvailable:!!this.depthTexture,
    prepared:this._lastPrepared,
+   pollenCount:this.pollen?.geometry?.attributes?.position?.count??0,
+   supplementaryPollenCount:this.pollen?.userData?.supplementaryPollenCount??0,
   };
  }
 

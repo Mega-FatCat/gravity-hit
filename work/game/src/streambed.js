@@ -459,6 +459,7 @@ function createStreambedMaterial(name, { baseRoughness = 0.88, sFreq = 16.0, mat
       sWeights /= max(0.0001, sWeights.x + sWeights.y + sWeights.z);
       float slope = 1.0 - abs(sNorm.y);
       float anchorQuality = 1.0 - smoothstep(0.0, 1.0, uMaterialClass);
+      float coarseQuality = 1.0 - smoothstep(1.45, 3.25, uMaterialClass);
       // The large waterline boulders need the same readable texel density as
       // the ritual slab. Keep the smaller classes at their established scale.
       float sFreqMacro = ${sFreq.toFixed(1)} * mix(0.45, 0.88, anchorQuality);
@@ -483,7 +484,10 @@ function createStreambedMaterial(name, { baseRoughness = 0.88, sFreq = 16.0, mat
       T.ShaderChunk.map_fragment.replace('diffuseColor *= sampledDiffuseColor;',
         `diffuseColor *= sampledDiffuseColor;
          vec3 grain = mDiff / vec3(0.658, 0.609, 0.550);
-         float grainBlend = mix(0.055, 0.095, anchorQuality);
+         // Exposed cobbles and medium stones need the same photographic grain
+         // density as the ritual slab. Fines stay calmer so the bed does not
+         // turn into high-frequency noise at distance.
+         float grainBlend = mix(0.10, 0.42, max(anchorQuality, coarseQuality));
          diffuseColor.rgb *= mix(vec3(1.0), grain, grainBlend);
          // Very restrained slope breakup keeps scan UV identity intact.
          float antiStretch = smoothstep(0.20, 0.50, slope);
@@ -502,7 +506,15 @@ function createStreambedMaterial(name, { baseRoughness = 0.88, sFreq = 16.0, mat
          // Fluvial capillary state is computed here and consumed by later
          // pre-light color / roughness / AO chunks.
          float depth = -0.065 - vStoneWorldPos.y;
-         float isSubmerged = clamp((depth + 0.012) / 0.024, 0.0, 1.0);
+         float rawSubmerged = clamp((depth + 0.012) / 0.024, 0.0, 1.0);
+         // A bank stone can have its center below the nominal water Y while its
+         // upward-facing crown is visibly in air. Treat those shallow crowns as
+         // exposed material instead of forcing the whole visible face through the
+         // submerged charcoal response. Deep/side faces retain the wet response.
+         float crownUp = smoothstep(0.10, 0.58, max(0.0, sNorm.y));
+         float crownNearSurface = 1.0 - smoothstep(0.035, 0.165, max(0.0, depth));
+         float exposedCrown = crownUp * crownNearSurface;
+         float isSubmerged = rawSubmerged * (1.0 - exposedCrown * 0.86);
          float capillary = clamp((vStoneWorldPos.y - (-0.065) + 0.024) / 0.024, 0.0, 1.0);
          float moistureFringe = 1.0 - capillary;
          float mediumReadability = smoothstep(0.72, 0.98, uMaterialClass) * (1.0 - smoothstep(2.95, 3.45, uMaterialClass));
@@ -510,7 +522,10 @@ function createStreambedMaterial(name, { baseRoughness = 0.88, sFreq = 16.0, mat
          float readableBedClast = max(mediumReadability, gravelReadability);
 
          // Moss/biofilm stays in a few damp, upward-facing pockets.
-         float shoreBand = 1.0 - smoothstep(0.012, 0.085, abs(vStoneWorldPos.y - (-0.065)));
+         float shoreBand = max(
+           1.0 - smoothstep(0.012, 0.085, abs(vStoneWorldPos.y - (-0.065))),
+           exposedCrown * 0.92
+         );
          float mossPatch = smoothstep(0.78, 0.93, gh36Noise(vStoneWorldPos.xz * 1.18 + vec2(-5.0, 13.0)));
          mossPatch *= smoothstep(0.22, 0.72, sNorm.y) * (0.30 + shoreBand * 0.70) * (1.0 - isSubmerged * 0.72);
          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.34, 0.40, 0.25), mossPatch * 0.16);
@@ -530,6 +545,16 @@ function createStreambedMaterial(name, { baseRoughness = 0.88, sFreq = 16.0, mat
       T.ShaderChunk.color_fragment + `
        float wetClass = smoothstep(0.55, 1.05, uMaterialClass);
        float fineClass = smoothstep(3.25, 4.80, uMaterialClass);
+       float dryStone = 1.0 - isSubmerged;
+       float dryCoarse = dryStone * (1.0 - fineClass) *
+         (1.0 - smoothstep(2.35, 3.10, uMaterialClass));
+       float dryFine = dryStone * fineClass;
+       // Bank value must change as a slope, not as a wet/dry switch. Keep the
+       // submerged bed exactly on its existing dark response, then progressively
+       // reveal the recovered scan as fragments climb the bank. The second ramp
+       // is reserved for a tiny highlight trim on the already-light upper stones.
+       float bankRise = smoothstep(-0.105, 0.155, vStoneWorldPos.y);
+       float upperBankRise = smoothstep(-0.010, 0.190, vStoneWorldPos.y);
        // Three multiplies the scan by instanceColor before this point. Recover
        // most of that tint's value loss while retaining its mineral-family hue,
        // then fold a restrained family carrier back into the real scan albedo.
@@ -544,25 +569,65 @@ function createStreambedMaterial(name, { baseRoughness = 0.88, sFreq = 16.0, mat
        float instanceValue = dot(instanceMineral, vec3(0.299, 0.587, 0.114));
        float tintRecovery = 1.0 / mix(1.0, max(0.54, instanceValue), 0.68);
        diffuseColor.rgb *= tintRecovery;
+       // Recover the native 4K scan before the instance tint so dry coarse
+       // stones can match the ritual slab instead of reading as black silhouettes.
+       vec3 nativeScan = diffuseColor.rgb /
+         max(vec3(0.08), instanceMineral * tintRecovery);
        float familyPeak = max(0.001, max(instanceMineral.r, max(instanceMineral.g, instanceMineral.b)));
        vec3 familyChromatic = instanceMineral / familyPeak;
        float scanValue = max(0.001, dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)));
        vec3 familyCarrier = familyChromatic * scanValue;
        float familyBlend = mix(0.34, 0.27, fineClass);
+       familyBlend *= mix(1.0, 0.24, max(dryCoarse, dryFine * 0.84));
        diffuseColor.rgb = mix(diffuseColor.rgb, familyCarrier, familyBlend);
+       vec3 ritualSlabTint = vec3(0.94, 0.90, 0.82);
+       // Every stone that emerges above the waterline uses the same recovered
+       // 4K scan response as the ritual slab. Previously only coarse classes got
+       // this treatment, leaving the dry pebble/shingle shoreline almost black.
+       // Bank stones can sit geometrically below the nominal water plane while
+       // still being outside the actual water mesh. Treat the narrow vertical
+       // waterline band as scan-readable too, otherwise those exposed edge
+       // stones incorrectly take the submerged charcoal response.
+       float shoreCoarse = shoreBand * (1.0 - fineClass);
+       float shoreFine = shoreBand * fineClass;
+       float dryScanMix = clamp(
+         dryCoarse * mix(0.70, 0.92, bankRise) +
+         dryFine * mix(0.62, 0.80, bankRise) +
+         shoreCoarse * mix(0.54, 0.72, bankRise) +
+         shoreFine * mix(0.42, 0.56, bankRise),
+         0.0,
+         0.98
+       );
+       diffuseColor.rgb = mix(diffuseColor.rgb, nativeScan * ritualSlabTint, dryScanMix);
+       // Match the exposed crown to the same dry-rock 4K micro-albedo used by
+       // the main ritual stone. This is deliberately a texture replacement on
+       // the air-facing crown, not a flat brightness floor, so grain and mineral
+       // breakup remain visible while side/bottom faces can stay wet and dark.
+       // Match the ritual slab's actual material multiplier (#b6b5a3 in sRGB,
+       // roughly this darker brown/grey range in linear space) instead of using
+       // the raw dry texture at near-white strength.
+       vec3 ritualCrownAlbedo = min(vec3(0.38), mDiff * vec3(0.28, 0.245, 0.205));
+       diffuseColor.rgb = mix(diffuseColor.rgb, ritualCrownAlbedo, exposedCrown * 0.84);
        // The photogrammetry atlas is authored very conservatively in linear
        // albedo. Raise its exposure multiplicatively before lighting instead of
        // imposing a post-light value floor; texture contrast and mineral hue
        // remain intact, including the deliberately darker minority stones.
        float mineralExposure = mix(3.35, 3.85, wetClass);
        mineralExposure = mix(mineralExposure, 3.65, fineClass);
+       mineralExposure = mix(mineralExposure, 3.52, dryCoarse);
+       mineralExposure = mix(mineralExposure, 3.38, dryFine);
+       mineralExposure = mix(mineralExposure, 3.48, shoreBand * 0.72);
+       // The ritual-stone micro-albedo above is already authored at the correct
+       // dry value. Do not run exposed crowns through the strong dark-atlas
+       // compensation used by the submerged scan, or they blow out to chalk.
+       mineralExposure = mix(mineralExposure, 1.12, exposedCrown * 0.94);
        diffuseColor.rgb *= mineralExposure;
-       float wetDarken = mix(0.80, 0.86, wetClass);
-       wetDarken = mix(wetDarken, 0.88, fineClass);
+       float wetDarken = mix(0.90, 0.94, wetClass);
+       wetDarken = mix(wetDarken, 0.95, fineClass);
        float wetAmount = max(isSubmerged, moistureFringe * 0.28);
        vec3 wetBase = diffuseColor.rgb * wetDarken;
        float wetLuma = dot(wetBase, vec3(0.299, 0.587, 0.114));
-       wetBase = mix(vec3(wetLuma), wetBase, 1.07);
+       wetBase = mix(vec3(wetLuma), wetBase, 1.04);
        diffuseColor.rgb = mix(diffuseColor.rgb, wetBase, wetAmount);
 
        // Dry faces preserve the actual scan/tint. Only bright exposed mineral
@@ -570,6 +635,12 @@ function createStreambedMaterial(name, { baseRoughness = 0.88, sFreq = 16.0, mat
        float dryFace = (1.0 - isSubmerged) * smoothstep(-0.080, -0.018, vStoneWorldPos.y);
        float dryPale = smoothstep(0.52, 0.78, dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)));
        diffuseColor.rgb *= mix(vec3(1.0), vec3(0.90, 0.88, 0.84), dryFace * dryPale * 0.42);
+       // Only the pale upper-bank end of the gradient gets this final 5% trim.
+       // Dark submerged stones have upperBankRise ~= 0 and are therefore bit-for-
+       // bit on the established path above.
+       float upperPaleLuma = smoothstep(0.24, 0.60, dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)));
+       float upperPaleTrim = upperBankRise * (1.0 - isSubmerged) * upperPaleLuma;
+       diffuseColor.rgb *= mix(1.0, 0.95, upperPaleTrim);
       `
     );
 
@@ -587,8 +658,8 @@ function createStreambedMaterial(name, { baseRoughness = 0.88, sFreq = 16.0, mat
        vec3 dMicro = vec3(0.0, cNX.y, cNX.x) * sWeights.x + vec3(cNY.x, 0.0, cNY.y) * sWeights.y + vec3(cNZ.x, cNZ.y, 0.0) * sWeights.z;
 
        vec3 dNw = dMacro * 0.18 + dMicro * 0.12;
-       float nStr = mix(0.34, 0.56, smoothstep(0.18, 0.48, slope));
-       nStr *= mix(1.0, 1.10, anchorQuality);
+       float nStr = mix(0.44, 0.72, smoothstep(0.18, 0.48, slope));
+       nStr *= mix(1.0, 1.18, max(anchorQuality, coarseQuality));
        // Tangential relief cannot flip a surface normal or pin it toward the
        // camera. The former view-Z clamp made wet facets pop during rotation.
        vec3 detailView = uViewRotation * dNw;
@@ -631,13 +702,17 @@ function createStreambedMaterial(name, { baseRoughness = 0.88, sFreq = 16.0, mat
        float mAO = texture2D(uMicroAO, sUvX1).r * sWeights.x + texture2D(uMicroAO, sUvY1).r * sWeights.y + texture2D(uMicroAO, sUvZ1).r * sWeights.z;
        // Preserve useful scan AO underwater without crushing the mineral tint.
        float submergedRelief = isSubmerged * readableBedClast;
+       float readableShore = max(dryStone, shoreBand * 0.88);
        float microAoStrength = mix(0.42, 0.26, submergedRelief);
+       microAoStrength = mix(microAoStrength, 0.18, readableShore);
        reflectedLight.indirectDiffuse *= mix(1.0, mAO, microAoStrength);
 
        // Local contact AO grounds stones while leaving upper facets legible.
        float contactAO = smoothstep(-0.85, -0.15, vStoneLocalY);
-       reflectedLight.indirectDiffuse *= mix(mix(0.56, 0.66, submergedRelief), 1.0, contactAO);
-       reflectedLight.directDiffuse *= mix(mix(0.70, 0.78, submergedRelief), 1.0, contactAO);
+       float indirectContactBase = mix(mix(0.56, 0.66, submergedRelief), 0.84, readableShore);
+       float directContactBase = mix(mix(0.70, 0.78, submergedRelief), 0.88, readableShore);
+       reflectedLight.indirectDiffuse *= mix(indirectContactBase, 1.0, contactAO);
+       reflectedLight.directDiffuse *= mix(directContactBase, 1.0, contactAO);
       `
     );
 
@@ -648,7 +723,73 @@ function createStreambedMaterial(name, { baseRoughness = 0.88, sFreq = 16.0, mat
        // canopy shadow, still proportional to the real scan albedo and lighting.
        float ghFamilyFill = mix(0.035, 0.060, readableBedClast);
        ghFamilyFill = mix(ghFamilyFill, 0.045, fineClass);
+       float waterlineCoarse = shoreBand * (1.0 - fineClass) *
+         (1.0 - smoothstep(2.35, 3.10, uMaterialClass));
+       ghFamilyFill += dryCoarse * 0.55 + dryFine * 0.32 + waterlineCoarse * 0.12;
+       ghFamilyFill += shoreCoarse * 0.46 + shoreFine * 0.26;
        reflectedLight.indirectDiffuse += diffuseColor.rgb * ghFamilyFill;
+       // Keep the actual 4K photogrammetry albedo legible on the hand-sized
+       // bed-forming classes even under deep canopy and through the water layer.
+       // The previous light-only response made these textured scans collapse to
+       // charcoal silhouettes, which visually reopened substrate lanes.
+       float handSizedClass = 1.0 - smoothstep(2.55, 3.35, uMaterialClass);
+       float scanSkyFill = handSizedClass * mix(0.20, 0.30, readableBedClast);
+       reflectedLight.indirectDiffuse += nativeScan * ritualSlabTint * scanSkyFill;
+       // Preserve the actual high-resolution scan at the visible wet/dry lip.
+       // This is texture-derived ambient response, not a flat RGB floor.
+       reflectedLight.indirectDiffuse += nativeScan * ritualSlabTint *
+         (shoreCoarse * 0.22 + shoreFine * 0.13);
+       // The sparse class-1 anchors use the darkest parts of the scan atlas and
+       // can otherwise collapse to charcoal in canopy shade even when dry.
+       // Add a bounded texture-derived sky term from the same micro-map used on
+       // the ritual slab so surface detail remains visible without a flat RGB floor.
+       float dryAnchorSky = dryCoarse * anchorQuality;
+       reflectedLight.indirectDiffuse += mDiff * vec3(0.32, 0.30, 0.27) * dryAnchorSky * 0.32;
+      `
+    );
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <output_fragment>',
+      `
+       // Texture-derived ambient readability for the actual dry/waterline bank.
+       // Some shoreline stones sit below the nominal flat water Y while being
+       // laterally outside the water mesh, so depth alone can classify them as
+       // submerged. This wider vertical band restores the same 4K scan detail
+       // visible on the ritual slab without imposing a flat RGB value floor.
+       float ghBankBand = 1.0 - smoothstep(0.025, 0.180, abs(vStoneWorldPos.y - (-0.065)));
+       // Match the same gradual bed->bank value ramp used pre-light. The previous
+       // max(1-isSubmerged, ...) introduced a visible brightness step as soon as
+       // a stone crossed the water classification threshold.
+       float ghAirReadable = (1.0 - isSubmerged) * mix(0.56, 0.94, bankRise);
+       float ghBandReadable = ghBankBand * mix(0.50, 0.84, bankRise);
+       float ghBankReadable = max(ghAirReadable, ghBandReadable);
+       float ghHandSized = 1.0 - smoothstep(2.55, 3.35, uMaterialClass);
+       vec3 ghReadableScan = min(vec3(0.92), nativeScan * ritualSlabTint * 3.25);
+       outgoingLight += ghReadableScan * (ghHandSized * 0.075 + ghBankReadable * mix(0.18, 0.30, ghHandSized));
+       // The shared scan atlas contains dark unused UV/background regions. When
+       // a particular scanned/LOD face lands there, use the ritual slab's 4K dry
+       // triplanar micro-albedo as the fallback instead of amplifying black.
+       float ghNativeLuma = dot(ghReadableScan, vec3(0.299, 0.587, 0.114));
+       vec3 ghRitualMicro = min(vec3(0.36), mDiff * vec3(0.30, 0.265, 0.22));
+       float ghAtlasFallback = 1.0 - smoothstep(0.10, 0.24, ghNativeLuma);
+       vec3 ghScanComposite = mix(ghReadableScan, ghRitualMicro, ghAtlasFallback * 0.92);
+       float ghCompositeLuma = max(0.025, dot(ghScanComposite, vec3(0.299, 0.587, 0.114)));
+       // The uppermost exposed stones were still slightly brighter than the
+       // approved pre-regression reference because this post-light readability
+       // target could undo the small pre-light pale trim. Carry the same gradual
+       // bank ramp through the final target: deep stones are unchanged, while the
+       // already-light upper end is only ~6% darker.
+       float ghUpperTargetTrim = mix(1.0, 0.94, upperBankRise * (1.0 - isSubmerged));
+       float ghTargetLuma = mix(0.068, 0.100, ghBankReadable) * ghUpperTargetTrim;
+       vec3 ghScanFloor = min(vec3(0.82), ghScanComposite * max(1.0, ghTargetLuma / ghCompositeLuma));
+       // Fine pebble/gravel/grit above the waterline used to remain black even
+       // after the hand-sized material was corrected, visually reconnecting the
+       // shoreline into a dotted rail. Give every exposed/waterline stone the
+       // same photographed fallback, while deep submerged fines stay unchanged.
+       float ghReadableClass = max(ghHandSized, ghBankReadable * 0.92);
+       ghScanFloor *= ghReadableClass;
+       outgoingLight = max(outgoingLight, ghScanFloor);
+       #include <output_fragment>
       `
     );
   };
@@ -661,6 +802,90 @@ function createStreambedMaterial(name, { baseRoughness = 0.88, sFreq = 16.0, mat
   mat.customProgramCacheKey = () => `streambed-pbr-${sFreq.toFixed(1)}-${materialClass.toFixed(2)}-native-scan`;
   specularAntialiasing(mat);
   return mat;
+}
+
+function createStreamStickGeometry({ length = 0.46, radius = 0.012, seed = 9011 } = {}) {
+  const r = seededRandom(seed);
+  const points = [];
+  for (let i = 0; i <= 7; i++) {
+    const t = i / 7;
+    points.push(V(
+      (t - 0.5) * length,
+      Math.sin(t * Math.PI) * (0.008 + r() * 0.006) + (r() - 0.5) * 0.003,
+      (r() - 0.5) * 0.018
+    ));
+  }
+  const curve = new T.CatmullRomCurve3(points, false, 'centripetal');
+  const geometry = new T.TubeGeometry(curve, 28, radius, 10, false);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function addStreamWaterSticks(world, spatialGrid) {
+  const group = new T.Group();
+  group.name = 'Streambed water sticks';
+  group.userData = { noPick: true, pickable: false };
+  const specs = [
+    { z: -0.38, side: -0.04, length: 0.48, radius: 0.0125, angle: 0.82, seed: 9011 },
+    { z: 1.66, side: 0.10, length: 0.36, radius: 0.0105, angle: 2.18, seed: 9047 },
+    { z: 3.34, side: -0.10, length: 0.44, radius: 0.0115, angle: 1.08, seed: 9091 }
+  ];
+  const offsets = [
+    [0, 0], [0.12, -0.06], [-0.14, 0.07], [0.24, 0.02], [-0.25, -0.03],
+    [0.08, 0.13], [-0.08, -0.14], [0.31, -0.10], [-0.32, 0.10]
+  ];
+  let count = 0;
+
+  for (const spec of specs) {
+    let best = null;
+    for (const [zOffset, sideOffset] of offsets) {
+      const z = spec.z + zOffset;
+      const halfWidth = creekWidth(z) * 0.5;
+      const x = channelX(z) + (spec.side + sideOffset) * halfWidth;
+      const dirX = Math.cos(spec.angle);
+      const dirZ = Math.sin(spec.angle);
+      const halfLen = spec.length * 0.5;
+      let supportY = -Infinity;
+      let valid = true;
+
+      for (let sample = 0; sample <= 12; sample++) {
+        const along = (sample / 12 - 0.5) * 2.0 * halfLen;
+        const sx = x + dirX * along;
+        const sz = z + dirZ * along;
+        const localHalf = creekWidth(sz) * 0.5;
+        if (Math.abs(sx - channelX(sz)) > localHalf * 0.76) {
+          valid = false;
+          break;
+        }
+        let localSupport = forestHeight(sx, sz);
+        for (const { stone } of spatialGrid.findOverlaps(sx, sz, spec.radius * 1.35)) {
+          localSupport = Math.max(localSupport, stone.yTop);
+        }
+        supportY = Math.max(supportY, localSupport);
+      }
+      if (!valid || !Number.isFinite(supportY)) continue;
+      if (!best || supportY < best.supportY) best = { x, z, supportY };
+    }
+
+    if (!best) continue;
+    const y = best.supportY + spec.radius * 1.04;
+    const mesh = new T.Mesh(
+      createStreamStickGeometry({ length: spec.length, radius: spec.radius, seed: spec.seed }),
+      world.barkMat
+    );
+    mesh.name = `Streambed water stick ${count + 1}`;
+    mesh.position.set(best.x, y, best.z);
+    mesh.rotation.y = -spec.angle;
+    mesh.rotation.z = (count - 1) * 0.035;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData = { noPick: true, pickable: false };
+    group.add(mesh);
+    count++;
+  }
+
+  if (count) world.scene.add(group);
+  return { group: count ? group : null, count };
 }
 
 /**
@@ -853,7 +1078,23 @@ export function buildStreambed(world) {
     const edge = Math.abs(side);
     const edgeFade = T.MathUtils.smoothstep(edge, 0.76, 0.99);
     const breakNoise = noise2D(z * 0.57 + salt, side * 1.37 - salt * 0.19);
-    return 1.0 - edgeFade * T.MathUtils.lerp(0.34, 0.82, breakNoise);
+    // A second, broader field creates whole missing shoreline segments. A mere
+    // density fade still left enough tiny stones to trace a continuous rail.
+    const bankSweep = noise2D(z * 0.24 + salt * 0.41, (side < 0 ? -19.0 : 23.0) + salt);
+    const bankBreak = T.MathUtils.smoothstep(bankSweep, 0.56, 0.72);
+    const density = 1.0 - edgeFade * T.MathUtils.lerp(0.46, 0.92, breakNoise);
+    return density * (1.0 - edgeFade * bankBreak * 0.96);
+  }
+
+  // A real creek edge advances and retreats around bars, roots and scour pockets.
+  // Give each bank its own metre-scale envelope so coarse stones cannot settle
+  // into two parallel single-file necklaces along the nominal water boundary.
+  function irregularShoreLimit(side, z, salt) {
+    const bankSign = side < 0 ? -1.0 : 1.0;
+    const broad = noise2D(z * 0.23 + salt + bankSign * 5.7, 21.0 + bankSign * 9.3);
+    const detail = noise2D(z * 0.51 - salt * 0.37, 47.0 - bankSign * 6.1);
+    const shape = T.MathUtils.smoothstep(broad * 0.76 + detail * 0.24, 0.20, 0.82);
+    return T.MathUtils.lerp(0.54, 0.94, shape);
   }
 
   // --- TIER 0: Class 1 Anchor Boulders (28cm - 46cm) ---
@@ -945,10 +1186,18 @@ export function buildStreambed(world) {
   // separate from the dense channel scatter so the integration reads as
   // natural edge deposition instead of a new hard boundary or a rock carpet.
   const transitionBankSamples = [
-    [-1.18, -1.62, 0.92, 0.62], [-1.11, -0.28, 0.78, 0.72], [1.13, 0.22, 0.88, 0.58],
-    [1.10, 1.04, 0.76, 0.76], [1.15, 2.10, 0.90, 0.64], [-1.12, 3.42, 0.82, 0.82],
-    [1.08, 3.86, 0.74, 0.56], [-1.16, 4.52, 0.86, 0.78], [1.12, 5.18, 0.78, 0.60],
-    [-1.10, 6.05, 0.82, 0.76]
+    [-1.08, -1.62, 0.92, 0.78],
+    [-0.84, -0.18, 0.82, 0.76],
+    [1.17, 0.34, 0.90, 0.82],
+    [0.91, 1.48, 0.84, 0.78],
+    [-1.20, 3.34, 0.88, 0.82],
+    [1.03, 5.06, 0.82, 0.72],
+    [0.70, -2.72, 1.08, 0.94],
+    [-1.27, -0.88, 0.76, 0.68],
+    [1.22, 2.42, 1.02, 0.90],
+    [-0.73, 4.16, 1.10, 0.96],
+    [1.29, 6.38, 0.78, 0.70],
+    [-1.13, 7.62, 0.94, 0.84]
   ];
   for (const [side, z, scale, renderScale = scale] of transitionBankSamples) {
     const hw = creekWidth(z) * 0.5;
@@ -1046,7 +1295,22 @@ export function buildStreambed(world) {
     const centerBiasedSide = (cr() + cr() - 1.0) * 0.92;
     const uniformSide = (cr() * 2.0 - 1.0) * 0.92;
     const side = T.MathUtils.clamp(cr() < 0.74 ? centerBiasedSide : uniformSide, -0.94, 0.94);
+    const shoreLimit = irregularShoreLimit(side, zEff, 17.0);
+    if (Math.abs(side) > shoreLimit) {
+      cr(); // Preserve the established deterministic RNG consumption.
+      continue;
+    }
     const x = cx + side * hw;
+    const cobbleEdge = Math.abs(side);
+    if (cobbleEdge > 0.67) {
+      // Large stones at the lip need to arrive as discrete bars/clusters rather
+      // than one continuous necklace. Two independent world-space fields create
+      // long breaks plus local variation without changing the RNG stream.
+      const bankPatch = noise2D(zEff * 0.17 + (side > 0 ? 83.0 : -61.0), 91.0 + (side > 0 ? 7.0 : -9.0));
+      const localGate = noise2D(x * 3.7 + 29.0, zEff * 2.8 - 41.0);
+      const patchKeep = T.MathUtils.lerp(0.06, 0.68, T.MathUtils.smoothstep(bankPatch, 0.44, 0.78));
+      if (localGate > patchKeep) continue;
+    }
 
     const refillDistance = Math.hypot(x - refillX, zEff - refillZ);
     // Broaden the upper tail without creating a boulder field. Most stones stay
@@ -1123,6 +1387,11 @@ export function buildStreambed(world) {
     // exact shoreline with a bright, continuous row. GH-37 transition stones
     // already own the final wet/dry lip.
     const side = T.MathUtils.clamp((mr() * 2 - 1) * 0.96 + (crossFacies - 0.5) * 0.12, -0.985, 0.985);
+    const shoreLimit = irregularShoreLimit(side, zEff, 29.0);
+    if (Math.abs(side) > shoreLimit) {
+      mr(); // Preserve the established deterministic RNG consumption.
+      continue;
+    }
     const x = cx + side * hw;
 
     // Keep only small/local connected sediment windows. The prior threshold
@@ -1144,6 +1413,15 @@ export function buildStreambed(world) {
     // this low-frequency thinning.
     const shoreBreak = noise2D(zEff * 0.34 + (side > 0 ? 11.0 : -17.0), 53.0 + side * 1.7);
     if (edge > 0.77 && shoreBreak > 0.61 && mr() < T.MathUtils.lerp(0.30, 0.72, edgeFade)) continue;
+    if (edge > 0.72) {
+      // Medium stones were the actual source of the dark single-file necklace
+      // in diagnostic isolation renders. Keep them in metre-scale bank patches
+      // with long empty breaks, while the central bed retains full density.
+      const bankPatch = noise2D(zEff * 0.19 + (side > 0 ? 61.0 : -37.0), 73.0 + (side > 0 ? 8.0 : -6.0));
+      const patchStrength = T.MathUtils.smoothstep(bankPatch, 0.48, 0.79);
+      const bankAcceptance = T.MathUtils.lerp(0.05, 0.58, patchStrength) * T.MathUtils.lerp(0.78, 1.0, 1.0 - edgeFade);
+      if (mr() > bankAcceptance) continue;
+    }
     const density = Math.min(1.0, centerWeight * edgeWeight * faciesWeight * refillMediumDensity(x, zEff));
     if (mr() > density) continue;
 
@@ -1223,7 +1501,7 @@ export function buildStreambed(world) {
   // tower rule: it can nest against earlier cobbles/anchors but cannot build a
   // second story on another stacked stone.
   const repairR = seededRandom(98617);
-  const repairAttempts = 7600;
+  const repairAttempts = 11500;
   for (let attempt = 0; attempt < repairAttempts; attempt++) {
     const zEff = -15.6 + repairR() * 29.0;
     const hw = creekWidth(zEff) * 0.5;
@@ -1265,14 +1543,322 @@ export function buildStreambed(world) {
     });
   }
 
+  // --- TIER 2d: strict residual medium/coarse coverage repair ---
+  // The visible bed still had broad substrate lanes even though the fine classes
+  // were numerous. Fill those voids with hand-sized stones first. New floor
+  // stones require a real horizontal gap; when a gap is blocked by a larger
+  // anchor/cobble, a bounded subset may rest on that support at its computed
+  // surface height. A vertical conflict test rejects stacks that would cut
+  // through any neighboring stone.
+  const coverageR = seededRandom(114731);
+  const coverageTarget = 5200;
+  const coverageAttempts = 900000;
+  let coverageMediumCount = 0;
+  let coverageStackedCount = 0;
+  for (let attempt = 0; attempt < coverageAttempts && coverageMediumCount < coverageTarget; attempt++) {
+    const zEff = -15.5 + coverageR() * 29.0;
+    const hw = creekWidth(zEff) * 0.5;
+    const cx = channelX(zEff);
+    const sideWarp = (noise2D(zEff * 0.37 + 84.0, 17.0) - 0.5) * 0.08;
+    // This pass repairs the visible bed interior, not the shoreline. Keeping it
+    // inside the outer shelf lets us add real medium/coarse coverage without
+    // rebuilding the very necklace removed above.
+    const side = T.MathUtils.clamp((coverageR() + coverageR() - 1.0) * 0.74 + sideWarp, -0.79, 0.79);
+    const x = cx + side * hw;
+
+    const refillDistance = Math.hypot(x - refillX, zEff - refillZ);
+    if (refillDistance < 0.30) continue;
+    const refillFeather = T.MathUtils.smoothstep(refillDistance, 0.30, 0.88);
+    if (coverageR() > T.MathUtils.lerp(0.36, 1.0, refillFeather)) continue;
+
+    const large = coverageR() < 0.38;
+    const scale = large
+      ? 1.28 + coverageR() * 0.42
+      : 0.86 + coverageR() * 0.49;
+    const radius = 0.045 * scale;
+    const variant = Math.min(3, Math.floor(coverageR() * 4));
+    const shapeHeights = [0.30, 0.25, 0.32, 0.23];
+    const halfH = 0.045 * (large ? 0.29 : shapeHeights[variant]) * scale;
+    const overlaps = spatialGrid.findOverlaps(x, zEff, radius * 1.04);
+    const floorBlocked = overlaps.some(({stone, dist}) => dist < (stone.r + radius) * 0.94);
+
+    let yCenter;
+    let normalVec;
+    let isStacked = false;
+    let coverageDepth = 0;
+    if (!floorBlocked) {
+      const gy = forestHeight(x, zEff);
+      const embed = 0.30 + coverageR() * 0.06;
+      yCenter = gy + (1.0 - 2.0 * embed) * halfH;
+      normalVec = getGroundNormal(x, zEff);
+    } else {
+      // Stacking is reserved for a larger, non-stacked support. This prevents
+      // tower growth and makes added coverage rest on top instead of phasing.
+      if (coverageR() > 0.90) continue;
+      const supports = overlaps
+        .filter(({stone, dist}) => {
+          if (stone.tier > 2) return false;
+          const depth = stone.coverageDepth ?? (stone.isStacked ? 1 : 0);
+          if (depth > 2) return false;
+          if (depth === 0) {
+            return stone.r >= radius * 0.90 && dist <= stone.r * 0.94;
+          }
+          if (depth === 1) {
+            // A second visible layer is only allowed as a smaller stone sitting
+            // well inside a larger support. This fills projected holes without
+            // building unstable towers or intersecting neighboring geometry.
+            return !large && stone.r >= radius * 1.10 && dist <= stone.r * 0.76;
+          }
+          // A rare third contact is even more conservative: small stone, much
+          // larger support, center-weighted. The vertical conflict test below
+          // still rejects any neighbor intersection.
+          return !large && stone.r >= radius * 1.30 && dist <= stone.r * 0.58;
+        })
+        .sort((a, b) => b.stone.yTop - a.stone.yTop);
+      if (!supports.length) continue;
+      const support = supports[0];
+      const base = support.stone;
+      coverageDepth = (base.coverageDepth ?? (base.isStacked ? 1 : 0)) + 1;
+      const radial = T.MathUtils.clamp(support.dist / Math.max(0.001, base.r), 0.0, 0.96);
+      const surfaceY = base.y + base.h * Math.sqrt(Math.max(0.0, 1.0 - radial * radial));
+      yCenter = surfaceY + halfH * 0.98;
+      const bottom = yCenter - halfH;
+      const top = yCenter + halfH;
+      const verticalConflict = overlaps.some(({stone, dist}) => {
+        if (stone === base) return false;
+        if (dist >= (stone.r + radius) * 0.92) return false;
+        return bottom < stone.yTop + 0.004 && top > stone.yBase - 0.004;
+      });
+      if (verticalConflict) continue;
+      normalVec = V(
+        (x - base.x) / Math.max(0.001, base.r),
+        1.0,
+        (zEff - base.z) / Math.max(0.001, base.r)
+      ).normalize();
+      isStacked = true;
+    }
+
+    const qAlign = new T.Quaternion().setFromUnitVectors(V(0, 1, 0), normalVec);
+    const qYaw = new T.Quaternion().setFromAxisAngle(V(0, 1, 0), flowYawAt(zEff) + (coverageR() - 0.5) * 2.65);
+    const qTilt = new T.Quaternion().setFromEuler(new T.Euler(0.012 + coverageR() * 0.035, 0, (coverageR() - 0.5) * 0.05, 'YXZ'));
+    spatialGrid.insert({
+      x, y: yCenter, z: zEff, r: radius, h: halfH,
+      yTop: yCenter + halfH, yBase: yCenter - halfH,
+      tier: 2, isAnchor: false, isStacked, coverageDepth
+    });
+
+    const color = pickMediumColor(coverageR);
+    const aspectNoise = noise2D(x * 2.8 + 33.0, zEff * 2.1 - 19.0);
+    const item = {
+      x, y: yCenter, z: zEff,
+      quaternion: qAlign.clone().multiply(qYaw).multiply(qTilt),
+      sx: scale * T.MathUtils.lerp(0.91, 1.0, aspectNoise),
+      sy: scale,
+      sz: scale * T.MathUtils.lerp(1.0, 0.91, aspectNoise),
+      color
+    };
+    const isNear = Math.abs(zEff - refillZ) < 5.0;
+    (isNear ? mediumNearPlacements : mediumFarPlacements)[variant].push(item);
+    coverageMediumCount++;
+    if (isStacked) coverageStackedCount++;
+  }
+
+  // --- TIER 2e: collision-safe irregular water-edge repair ---
+  // Walk both banks in short, jittered longitudinal intervals and only add a
+  // stone when the nominal lip is not already covered. The lateral center meanders
+  // with two noise scales and some high-bar segments get a second in/out shoulder,
+  // so the result fills the water edge without drawing a parallel rock necklace.
+  // Every accepted stone is checked against ALL existing tiers before insertion.
+  const edgeRepairR = seededRandom(128903);
+  let edgeRepairCount = 0;
+  let edgeRepairSlots = 0;
+  for (const bankSign of [-1, 1]) {
+    let zCursor = -15.45 + edgeRepairR() * 0.10;
+    while (zCursor <= 13.45) {
+      const zBase = zCursor + (edgeRepairR() - 0.5) * 0.15;
+      zCursor += 0.135 + edgeRepairR() * 0.070;
+
+      const hw = creekWidth(zBase) * 0.5;
+      const cx = channelX(zBase);
+      const broad = noise2D(zBase * 0.22 + bankSign * 19.0, 91.0 + bankSign * 7.0);
+      const detail = noise2D(zBase * 0.61 - bankSign * 13.0, 117.0 - bankSign * 5.0);
+      const shelfSide = T.MathUtils.clamp(
+        0.90 + (broad - 0.5) * 0.31 + (detail - 0.5) * 0.14,
+        0.73,
+        1.15
+      );
+      const targetX = cx + bankSign * shelfSide * hw;
+      edgeRepairSlots++;
+
+      // Existing stones count as coverage. Broad depositional bars sometimes get
+      // one additional shoulder stone so the edge widens irregularly instead of
+      // merely becoming a denser single-file trace.
+      const nominalCovered = spatialGrid.findOverlaps(targetX, zBase, 0.076)
+        .some(({stone, dist}) => stone.r >= 0.020 && dist < stone.r + 0.046);
+      const barStrength = T.MathUtils.smoothstep(broad, 0.56, 0.84);
+      const addShoulder = nominalCovered && barStrength > 0.24 && edgeRepairR() < (0.18 + barStrength * 0.30);
+      if (nominalCovered && !addShoulder) continue;
+
+      const localAttempts = nominalCovered ? 4 : 8;
+      for (let localAttempt = 0; localAttempt < localAttempts; localAttempt++) {
+        const shoulderDir = edgeRepairR() < 0.52 ? -1.0 : 1.0;
+        const shoulderOffset = addShoulder
+          ? shoulderDir * (0.045 + barStrength * 0.090)
+          : 0.0;
+        const sideJitter = (edgeRepairR() - 0.5) * (0.13 + barStrength * 0.07);
+        const candidateSide = T.MathUtils.clamp(shelfSide + shoulderOffset + sideJitter, 0.70, 1.19);
+        const zEff = zBase + (edgeRepairR() - 0.5) * 0.14;
+        const localHw = creekWidth(zEff) * 0.5;
+        const x = channelX(zEff) + bankSign * candidateSide * localHw;
+
+        // Mixed hand-sized edge stones: mostly 7-12cm diameter, with a restrained
+        // coarse tail in depositional bars. The true radius is reserved physically.
+        const coarse = edgeRepairR() < (0.12 + barStrength * 0.10);
+        const radius = coarse
+          ? 0.060 + edgeRepairR() * 0.022
+          : 0.034 + Math.pow(edgeRepairR(), 0.82) * 0.027;
+        const scale = radius / 0.045;
+        const variant = Math.min(3, Math.floor(edgeRepairR() * 4));
+        const shapeHeights = [0.30, 0.25, 0.32, 0.23];
+        const halfH = 0.045 * shapeHeights[variant] * scale;
+
+        const overlaps = spatialGrid.findOverlaps(x, zEff, radius * 1.04);
+        const physicalConflict = overlaps.some(({stone, dist}) =>
+          dist < (stone.r + radius) * 0.90
+        );
+        if (physicalConflict) continue;
+        if (isRefillCore(x, zEff, radius * 0.42)) continue;
+
+        const gy = forestHeight(x, zEff);
+        const embed = 0.48 + edgeRepairR() * 0.07;
+        const contact = spatialGrid.computeContactElevation(x, zEff, radius, halfH, gy, 2, embed);
+        // The all-tier conflict test above means these are floor-seated repairs;
+        // reject an unexpected stack rather than risk a hidden intersection.
+        if (contact.isStacked) continue;
+        const normalVec = getGroundNormal(x, zEff);
+        const qAlign = new T.Quaternion().setFromUnitVectors(V(0, 1, 0), normalVec);
+        const qYaw = new T.Quaternion().setFromAxisAngle(
+          V(0, 1, 0),
+          flowYawAt(zEff) + (edgeRepairR() - 0.5) * 2.9
+        );
+        const qTilt = new T.Quaternion().setFromEuler(new T.Euler(
+          0.018 + edgeRepairR() * 0.045,
+          0,
+          (edgeRepairR() - 0.5) * 0.065,
+          'YXZ'
+        ));
+        const yCenter = contact.yCenter;
+        spatialGrid.insert({
+          x, y: yCenter, z: zEff, r: radius, h: halfH,
+          yTop: yCenter + halfH, yBase: yCenter - halfH,
+          tier: 2, isAnchor: false, isStacked: false, edgeRepair: true
+        });
+
+        const color = pickMediumColor(edgeRepairR);
+        const aspectNoise = noise2D(x * 2.7 + 101.0, zEff * 2.0 - 47.0);
+        const item = {
+          x, y: yCenter, z: zEff,
+          quaternion: qAlign.clone().multiply(qYaw).multiply(qTilt),
+          sx: scale * T.MathUtils.lerp(0.90, 1.0, aspectNoise),
+          sy: scale,
+          sz: scale * T.MathUtils.lerp(1.0, 0.90, aspectNoise),
+          color
+        };
+        const isNear = Math.abs(zEff - refillZ) < 5.0;
+        (isNear ? mediumNearPlacements : mediumFarPlacements)[variant].push(item);
+        edgeRepairCount++;
+        break;
+      }
+    }
+  }
+
+  // --- TIER 2f: small irregular lip-gap repair ---
+  // Medium edge stones above establish the broken shoreline silhouette, but a
+  // hand-sized clast can still leave a visible water sliver on either side. Fill
+  // only those residual lip gaps with pebble-scale stones. Their centers wander
+  // independently of the medium pass, and every candidate is rejected on real
+  // footprint conflict, so this closes holes without forming a ruler-straight row
+  // or introducing mesh phasing.
+  const edgeGapR = seededRandom(173411);
+  let edgeGapRepairCount = 0;
+  for (const bankSign of [-1, 1]) {
+    let zCursor = -15.40 + edgeGapR() * 0.08;
+    while (zCursor <= 13.40) {
+      const zBase = zCursor + (edgeGapR() - 0.5) * 0.13;
+      zCursor += 0.105 + edgeGapR() * 0.060;
+      const hw = creekWidth(zBase) * 0.5;
+      const broad = noise2D(zBase * 0.27 + bankSign * 31.0, 151.0);
+      const detail = noise2D(zBase * 0.83 - bankSign * 11.0, 173.0);
+      const lipSide = T.MathUtils.clamp(
+        0.895 + (broad - 0.5) * 0.26 + (detail - 0.5) * 0.12,
+        0.75,
+        1.12
+      );
+      const xNominal = channelX(zBase) + bankSign * lipSide * hw;
+
+      const alreadyCovered = spatialGrid.findOverlaps(xNominal, zBase, 0.054)
+        .some(({stone, dist}) => stone.r >= 0.013 && dist < stone.r + 0.031);
+      if (alreadyCovered) continue;
+
+      for (let localAttempt = 0; localAttempt < 6; localAttempt++) {
+        const zEff = zBase + (edgeGapR() - 0.5) * 0.095;
+        const localHw = creekWidth(zEff) * 0.5;
+        const candidateSide = T.MathUtils.clamp(
+          lipSide + (edgeGapR() - 0.5) * 0.115,
+          0.72,
+          1.15
+        );
+        const x = channelX(zEff) + bankSign * candidateSide * localHw;
+        const scale = 0.66 + edgeGapR() * 0.42;
+        const radius = 0.028 * scale;
+        const halfH = 0.028 * 0.36 * scale;
+        const overlaps = spatialGrid.findOverlaps(x, zEff, radius * 1.04);
+        const physicalConflict = overlaps.some(({stone, dist}) =>
+          dist < (stone.r + radius) * 0.89
+        );
+        if (physicalConflict || isRefillCore(x, zEff, radius * 0.40)) continue;
+
+        const gy = forestHeight(x, zEff);
+        const contact = spatialGrid.computeContactElevation(x, zEff, radius, halfH, gy, 3, 0.60);
+        if (contact.isStacked) continue;
+        const normalVec = getGroundNormal(x, zEff);
+        const qAlign = new T.Quaternion().setFromUnitVectors(V(0, 1, 0), normalVec);
+        const qYaw = new T.Quaternion().setFromAxisAngle(V(0, 1, 0), edgeGapR() * TAU);
+        const qTilt = new T.Quaternion().setFromEuler(new T.Euler(
+          0.018 + edgeGapR() * 0.055,
+          0,
+          (edgeGapR() - 0.5) * 0.10,
+          'YXZ'
+        ));
+        const yCenter = contact.yCenter;
+        spatialGrid.insert({
+          x, y: yCenter, z: zEff, r: radius, h: halfH,
+          yTop: yCenter + halfH, yBase: yCenter - halfH,
+          tier: 3, isAnchor: false, isStacked: false, edgeGapRepair: true
+        });
+        const {color} = pickBedClastColor(edgeGapR);
+        pebblePlacements.push({
+          x, y: yCenter, z: zEff,
+          quaternion: qAlign.clone().multiply(qYaw).multiply(qTilt),
+          sx: scale * T.MathUtils.lerp(0.90, 1.0, detail),
+          sy: scale,
+          sz: scale * T.MathUtils.lerp(1.0, 0.90, detail),
+          color
+        });
+        edgeGapRepairCount++;
+        break;
+      }
+    }
+  }
+
   // --- TIER 3: residual-void pebbles & shingle (roughly 3cm - 6.5cm) ---
   // Stable random sampling replaces the former fixed-z pebble rows and authored
   // near-bank bar. Metre-scale facies fields vary density, while the spatial
   // grid makes each accepted stone occupy a real remaining interstice.
   const pr = seededRandom(53117);
-  const pebbleTarget = 3800;
-  const shingleTarget = 850;
-  const pebbleAttempts = 32000;
+  const pebbleTarget = 5500;
+  const shingleTarget = 1325;
+  const pebbleAttempts = 69000;
   for (let attempt = 0; attempt < pebbleAttempts; attempt++) {
     if (pebblePlacements.length >= pebbleTarget && shinglePlacements.length >= shingleTarget) break;
 
@@ -1281,6 +1867,7 @@ export function buildStreambed(world) {
     const cx = channelX(zEff);
     const lateralWarp = (noise2D(zEff * 0.58 + 17.0, 38.0) - 0.5) * 0.15;
     const side = T.MathUtils.clamp((pr() * 2.0 - 1.0) * 0.97 + lateralWarp, -0.995, 0.995);
+    if (Math.abs(side) > irregularShoreLimit(side, zEff, 41.0)) continue;
     const x = cx + side * hw;
 
     const facies = noise2D(x * 0.82 + 23.0, zEff * 0.61 - 8.0);
@@ -1303,7 +1890,7 @@ export function buildStreambed(world) {
     const radius = baseRadius * scale;
     const halfH = baseRadius * baseHScale * scale * T.MathUtils.lerp(0.74, 1.0, 1.0 - refillLowProfile);
 
-    const voidWeight = residualVoidWeight(x, zEff, radius, 3, 0.115);
+    const voidWeight = residualVoidWeight(x, zEff, radius, 3, 0.104);
     if (voidWeight <= 0.0 || pr() > voidWeight) continue;
     if (spatialGrid.hasSameTierCollision(x, zEff, radius, 3, 0.84)) continue;
 
@@ -1345,13 +1932,14 @@ export function buildStreambed(world) {
   // These particles occupy the leftover gaps in clustered facies. They do not
   // trace the channel edge or form a repeating longitudinal cadence.
   const gravelR = seededRandom(60493);
-  const gravelTarget = 1500;
-  const gravelAttempts = 13000;
+  const gravelTarget = 2850;
+  const gravelAttempts = 34000;
   for (let attempt = 0; attempt < gravelAttempts && gravelPlacements.length < gravelTarget; attempt++) {
     const zEff = -15.5 + gravelR() * 29.0;
     const hw = creekWidth(zEff) * 0.5;
     const cx = channelX(zEff);
     const side = T.MathUtils.clamp((gravelR() * 2.0 - 1.0) * 0.99 + (noise2D(zEff * 0.66, 54.0) - 0.5) * 0.12, -1.0, 1.0);
+    if (Math.abs(side) > irregularShoreLimit(side, zEff, 53.0)) continue;
     const x = cx + side * hw;
 
     const facies = noise2D(x * 1.08 - 18.0, zEff * 0.72 + 4.0);
@@ -1361,7 +1949,7 @@ export function buildStreambed(world) {
     const scale = 0.68 + gravelR() * 0.54;
     const radius = 0.013 * scale;
     const halfH = 0.013 * 0.40 * scale;
-    const voidWeight = residualVoidWeight(x, zEff, radius, 4, 0.070);
+    const voidWeight = residualVoidWeight(x, zEff, radius, 4, 0.062);
     if (voidWeight <= 0.0 || gravelR() > voidWeight) continue;
     if (spatialGrid.hasSameTierCollision(x, zEff, radius, 4, 0.82)) continue;
 
@@ -1387,13 +1975,14 @@ export function buildStreambed(world) {
 
   // --- TIER 5: sparse visible fines / grit (sub-3cm matrix) ---
   const gritR = seededRandom(65129);
-  const gritTarget = 800;
-  const gritAttempts = 9000;
+  const gritTarget = 1650;
+  const gritAttempts = 22500;
   for (let attempt = 0; attempt < gritAttempts && gritPlacements.length < gritTarget; attempt++) {
     const zEff = -10.0 + gritR() * 20.0;
     const hw = creekWidth(zEff) * 0.5;
     const cx = channelX(zEff);
     const side = T.MathUtils.clamp((gritR() * 2.0 - 1.0) * 0.98 + (noise2D(zEff * 0.73, 67.0) - 0.5) * 0.10, -1.0, 1.0);
+    if (Math.abs(side) > irregularShoreLimit(side, zEff, 71.0)) continue;
     const x = cx + side * hw;
     const facies = noise2D(x * 1.22 + 11.0, zEff * 0.80 - 5.0);
     if (gritR() > T.MathUtils.lerp(0.50, 0.90, facies) * irregularEdgeWeight(side, zEff, 47.0)) continue;
@@ -1401,7 +1990,7 @@ export function buildStreambed(world) {
     const scale = 0.80 + gritR() * 0.42;
     const radius = 0.009 * scale;
     const halfH = 0.009 * 0.42 * scale;
-    const voidWeight = residualVoidWeight(x, zEff, radius, 5, 0.052);
+    const voidWeight = residualVoidWeight(x, zEff, radius, 5, 0.046);
     if (voidWeight <= 0.0 || gritR() > voidWeight) continue;
     if (spatialGrid.hasSameTierCollision(x, zEff, radius, 5, 0.80)) continue;
 
@@ -1419,6 +2008,8 @@ export function buildStreambed(world) {
     const {color} = pickMineralColor(gritR);
     gritPlacements.push({x, y: yCenter, z: zEff, quaternion: qAlign.clone().multiply(qYaw), sx: scale, sy: scale, sz: scale, color});
   }
+
+  const waterSticks = addStreamWaterSticks(world, spatialGrid);
 
   // Visual-family partitioning happens only after every placement/collision has
   // already been accepted. Dedicated seeds keep the established physical bed
@@ -1600,6 +2191,7 @@ export function buildStreambed(world) {
     shingleMesh: shingleMeshes[0] || null,
     gravelMesh,
     gritMesh,
+    waterStickGroup: waterSticks.group,
     spatialGrid,
     counts: {
       anchors: anchorPlacements.length,
@@ -1611,6 +2203,11 @@ export function buildStreambed(world) {
       cobbleVariants: cobbleRenderPlacements.map(p => p.length),
       mediumPhysicalVariants: mediumNearPlacements.map((p, i) => p.length + mediumFarPlacements[i].length),
       mediumVariants: mediumNearRenderPlacements.map((p, i) => p.length + mediumFarRenderPlacements[i].length),
+      coverageMedium: coverageMediumCount,
+      coverageStacked: coverageStackedCount,
+      edgeRepair: edgeRepairCount,
+      edgeRepairSlots,
+      edgeGapRepair: edgeGapRepairCount,
       upperCobblePhysical: upperCobblePhysicalPlacements.length,
       upperCobbleVariants: upperCobbleRenderPlacements.map(p => p.length),
       upperCobblePromotions: 0,
@@ -1620,6 +2217,7 @@ export function buildStreambed(world) {
       shingleVariants: shingleRenderPlacements.map(p => p.length),
       gravel: gravelPlacements.length,
       grit: gritPlacements.length,
+      waterSticks: waterSticks.count,
       geometryBatches: {
         anchors: anchorMeshes.filter(Boolean).length + heroAnchorMeshes.filter(Boolean).length,
         cobbles: cobbleMeshes.filter(Boolean).length,
@@ -1712,9 +2310,11 @@ export function upgradeStreambedGeometries(world, sources, lods) {
     const f = heroAnchorFamilies[i] ?? heroAnchorFamilies[0];
     swap(heroAnchorMeshes[i], f.src, 0.18, f.h, false, f.ax, f.az);
   }
-  // 2. River cobbles: all six scans are represented. Source 3's tall/blocky
-  // scan is deliberately flattened so it reads as a water-set fractured cobble
-  // rather than an upright chunk.
+  // 2. River cobbles: all six scan silhouettes are represented through their
+  // companion LOD meshes. At 10-20cm world size the 4K material/normal maps carry
+  // the visible surface fidelity; repeating full-resolution scan topology across
+  // ~1k instances was spending tens of millions of triangles with no useful
+  // player-visible gain. Sparse anchors above remain full-resolution.
   const cobbleFamilies = [
     { src: sources[0], h: 0.42, ax: 0.96, az: 1.00 },
     { src: sources[1], h: 0.38, ax: 1.00, az: 0.96 },
@@ -1725,12 +2325,15 @@ export function upgradeStreambedGeometries(world, sources, lods) {
   ];
   for (let i = 0; i < cobbleFamilies.length; i++) {
     const f = cobbleFamilies[i];
-    swap(cobbleMeshes[i], f.src || sources[2] || sources[0], 0.058, f.h, false, f.ax, f.az);
+    swap(cobbleMeshes[i], f.src || sources[2] || sources[0], 0.058, f.h, true, f.ax, f.az);
   }
 
-  // 2b. Dominant medium deposit: eight real scan-derived silhouettes. The
-  // physical seating still uses the established four height profiles; each pair
-  // below shares that height while changing scan topology/asymmetry.
+  // 2b. Dominant medium deposit: eight scan-derived silhouettes using the
+  // companion LOD topology for both near and far batches. Full-res geometry here
+  // previously dominated the entire frame cost (individual batches reached
+  // ~16M triangles). The material remains the same 4K PBR/triplanar path, so the
+  // requested close-up texture resolution is preserved while silhouette density
+  // is appropriate for 6-12cm stones.
   const mediumFamilies = [
     { src: sources[0], h: 0.30, ax: 0.96, az: 1.00 },
     { src: sources[2], h: 0.30, ax: 1.00, az: 0.96 },
@@ -1743,13 +2346,13 @@ export function upgradeStreambedGeometries(world, sources, lods) {
   ];
   for (let i = 0; i < mediumFamilies.length; i++) {
     const f = mediumFamilies[i];
-    swap(mediumNearMeshes[i], f.src || sources[2] || sources[0], 0.045, f.h, false, f.ax, f.az);
+    swap(mediumNearMeshes[i], f.src || sources[2] || sources[0], 0.045, f.h, true, f.ax, f.az);
     swap(mediumFarMeshes[i], f.src || sources[2] || sources[0], 0.045, f.h, true, f.ax, f.az);
   }
 
-  // Physical upper-cobble tier: deliberately bias to rounded/sub-rounded
-  // full-resolution scans. The reserved physical footprint supplies the
-  // secondary size band; this mapping supplies water-worn scan silhouettes.
+  // Physical upper-cobble tier: use scan LODs as well. These are still small
+  // secondary stones; the full-resolution exceptions are the sparse Class 1
+  // anchors and refill hero anchors above.
   const upperCobbleFamilies = [
     { src: sources[2] ?? sources[0], h: 0.29, ax: 1.00, az: 0.98 },
     { src: sources[0] ?? sources[2], h: 0.28, ax: 0.94, az: 1.00 },
@@ -1757,7 +2360,7 @@ export function upgradeStreambedGeometries(world, sources, lods) {
   ];
   for (let i = 0; i < upperCobbleMeshes.length; i++) {
     const f = upperCobbleFamilies[i] ?? upperCobbleFamilies[0];
-    swap(upperCobbleMeshes[i], f.src, 0.045, f.h, false, f.ax, f.az);
+    swap(upperCobbleMeshes[i], f.src, 0.045, f.h, true, f.ax, f.az);
   }
 
   // 3. Pebbles and 3c gap-fill: five families, including the round source 2.
@@ -1785,10 +2388,11 @@ export function upgradeStreambedGeometries(world, sources, lods) {
     const f = shingleFamilies[i];
     swap(shingleMeshes[i], f.src || sources[5] || sources[1], 0.026, f.h, true, f.ax, f.az);
   }
-  // 5. River gravel: use sources[3] (small water-tumbled rock)
-  swap(gravelMesh, sources[3] || sources[2], 0.016, 0.42);
-  // 6. Interstitial grit: use sources[1] (fine stone chip)
-  swap(gritMesh, sources[1] || sources[4], 0.009, 0.45);
+  // 5/6. Gravel and grit deliberately keep their procedural low-poly geometry.
+  // At 1-3cm on screen their silhouette is sub-pixel/near-sub-pixel, while the
+  // shared 4K streambed PBR material still supplies mineral color, grain, normal
+  // relief and roughness. Scan geometry here cost several million triangles per
+  // frame without visible benefit.
 }
 
 /**

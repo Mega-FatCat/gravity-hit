@@ -222,8 +222,8 @@ export class World {
            float airFace=smoothstep(-0.080,0.010,vStreamMaskPos.y);
            float streamAir=streamNear*airFace;
            float paleAir=smoothstep(0.30,0.70,dot(diffuseColor.rgb,vec3(0.299,0.587,0.114)));
-           vec3 weatheredAir=mix(diffuseColor.rgb*vec3(0.50,0.47,0.42),grain*vec3(0.46,0.43,0.38),0.42);
-           diffuseColor.rgb=mix(diffuseColor.rgb,weatheredAir,streamAir*paleAir*0.94);`
+           vec3 weatheredAir=mix(diffuseColor.rgb*vec3(0.90,0.88,0.84),grain*vec3(0.88,0.86,0.82),0.24);
+           diffuseColor.rgb=mix(diffuseColor.rgb,weatheredAir,streamAir*paleAir*0.12);`
         )
       );
 
@@ -256,8 +256,8 @@ export class World {
       shader.fragmentShader=shader.fragmentShader.replace('#include <output_fragment>',`
          float streamAirOutput=streamNear*airFace;
          float paleOutput=smoothstep(0.34,0.70,dot(outgoingLight,vec3(0.299,0.587,0.114)));
-         vec3 weatheredOutput=mix(outgoingLight*vec3(0.52,0.49,0.45),outgoingLight*vec3(0.68,0.65,0.60),0.45);
-         outgoingLight=mix(outgoingLight,weatheredOutput,streamAirOutput*paleOutput*0.64);
+         vec3 weatheredOutput=mix(outgoingLight*vec3(0.94,0.92,0.88),outgoingLight*vec3(0.98,0.96,0.92),0.32);
+         outgoingLight=mix(outgoingLight,weatheredOutput,streamAirOutput*paleOutput*0.08);
          #include <output_fragment>`);
     };
     m.customProgramCacheKey=()=>'slab-detail-pbr-2';
@@ -385,8 +385,19 @@ export class World {
          float bankWet=smoothstep(-0.018,0.024,bankDepth);
          float bankLuma=dot(outgoingLight,vec3(0.299,0.587,0.114));
          vec3 bankWetColor=mix(vec3(bankLuma),outgoingLight*vec3(0.80,0.85,0.76),1.10);
-         bankWetColor*=vec3(0.84,0.88,0.81);
-         outgoingLight=mix(outgoingLight,bankWetColor,bankWet*0.82);
+         bankWetColor*=vec3(0.94,0.96,0.91);
+         outgoingLight=mix(outgoingLight,bankWetColor,bankWet*0.58);
+         // Full-resolution authored creek rocks use the same photographed scan
+         // as the ritual slab. Preserve that texture in canopy shadow rather
+         // than allowing the entire rock to collapse into a black silhouette.
+         float creekScanLuma=dot(diffuseColor.rgb,vec3(0.299,0.587,0.114));
+         vec3 creekMicroFallback=min(vec3(0.86),mDiff*vec3(1.03,0.96,0.86)*1.55);
+         float creekAtlasFallback=1.0-smoothstep(0.055,0.16,creekScanLuma);
+         vec3 creekReadableScan=mix(diffuseColor.rgb,creekMicroFallback,creekAtlasFallback*0.94);
+         float creekReadableLuma=max(0.025,dot(creekReadableScan,vec3(0.299,0.587,0.114)));
+         float creekTargetLuma=mix(0.25,0.17,bankWet);
+         vec3 creekScanFloor=min(vec3(0.80),creekReadableScan*max(1.0,creekTargetLuma/creekReadableLuma));
+         outgoingLight=max(outgoingLight,creekScanFloor);
          #include <output_fragment>`);
        };
        material.customProgramCacheKey=()=>`${m.customProgramCacheKey?.()??'slab-detail-pbr-2'}-${heroBank?'refill-bank':'creek'}-scan-pbr`;
