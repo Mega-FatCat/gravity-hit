@@ -786,12 +786,15 @@ function groundedGeometry(source) {
 
 function scanMaterial(source, world) {
   const m = source.clone();
-  m.color.setRGB(0.92, 0.92, 0.92);
-  m.roughness = 0.92;
+  // Preserve the photogrammetry albedo instead of bleaching the scan.  Ground
+  // wood in the reference is rough, low-contrast and locally varied rather
+  // than a bright, normal-map-sharpened prop.
+  m.color.setRGB(0.96, 0.94, 0.90);
+  m.roughness = 0.96;
   m.metalness = 0;
   m.side = T.DoubleSide;
-  m.envMapIntensity = 0.65;
-  m.normalScale?.set(1.6, 1.6);
+  m.envMapIntensity = 0.46;
+  m.normalScale?.set(1.05, 1.05);
   if (m.map) { m.map.anisotropy = 16; m.map.needsUpdate = true; }
   if (m.normalMap) { m.normalMap.anisotropy = 16; m.normalMap.needsUpdate = true; }
   return m;
@@ -1083,12 +1086,12 @@ export async function buildForestClutter(world, texture, gl) {
       map: pineBarkDiff,
       normalMap: pineBarkNor,
       roughnessMap: pineBarkRough,
-      normalScale: new T.Vector2(1.8, 1.8),
-      roughness: 0.88,
+      normalScale: new T.Vector2(1.08, 1.08),
+      roughness: 0.95,
       metalness: 0,
-      vertexColors: false,
-      color: '#d8cbb8',
-      envMapIntensity: 0.65
+      vertexColors: true,
+      color: '#b7a48d',
+      envMapIntensity: 0.46
     });
 
     barkFlakeMat = new T.MeshStandardMaterial({
@@ -1258,9 +1261,26 @@ export async function buildForestClutter(world, texture, gl) {
     }
   }
 
-  // 7. Procedural Clutter Batches
-  createInstancedBatch(createStickGeometry({ seed: 4123 }), stickMat, placements.sticks, 'Forest floor • Weathered stick', true);
-  createInstancedBatch(createForkTwigGeometry({ seed: 6319 }), stickMat, placements.forks, 'Forest floor • Forked twig', true);
+  // 7. Procedural Clutter Batches.  Three geometry families keep repeated
+  // sticks from reading as cloned props while retaining one shared PBR set.
+  const stickFamilies = [
+    createStickGeometry({ seed: 4123, length: 0.36, radiusStart: 0.018, radiusEnd: 0.011 }),
+    createStickGeometry({ seed: 4199, length: 0.41, radiusStart: 0.016, radiusEnd: 0.0085, segments: 30 }),
+    createStickGeometry({ seed: 4271, length: 0.33, radiusStart: 0.022, radiusEnd: 0.0135, segments: 25 })
+  ];
+  const forkFamilies = [
+    createForkTwigGeometry({ seed: 6319, stemLength: 0.27, forkLength: 0.15 }),
+    createForkTwigGeometry({ seed: 6397, stemLength: 0.31, forkLength: 0.13, radiusStem: 0.0125, radiusFork: 0.0075 }),
+    createForkTwigGeometry({ seed: 6469, stemLength: 0.25, forkLength: 0.18, radiusStem: 0.0155, radiusFork: 0.0095 })
+  ];
+  stickFamilies.forEach((geometry, i) => {
+    const subset = placements.sticks.filter((_, j) => j % stickFamilies.length === i);
+    createInstancedBatch(geometry, stickMat, subset, `Forest floor • Weathered stick variant ${i + 1}`, true);
+  });
+  forkFamilies.forEach((geometry, i) => {
+    const subset = placements.forks.filter((_, j) => j % forkFamilies.length === i);
+    createInstancedBatch(geometry, stickMat, subset, `Forest floor • Forked twig variant ${i + 1}`, true);
+  });
   createInstancedBatch(createLeafClusterGeometry({ seed: 5102 }), leafMat, placements.leafClusters, 'Forest floor • Organic leaf cluster', false);
   createInstancedBatch(createPineNeedleTuftGeometry({ seed: 8124 }), needleMat, placements.needleTufts, 'Forest floor • Pine needle tuft', false);
   createInstancedBatch(createBarkFlakeGeometry({ seed: 7129 }), barkFlakeMat, placements.barkFlakes, 'Forest floor • Pine bark scale', true);

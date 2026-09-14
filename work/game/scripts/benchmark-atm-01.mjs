@@ -8,6 +8,8 @@ const quality=process.argv.includes('--high')?'high':'medium';
 const frameCount=quality==='high'?90:180;
 const views=quality==='high'?[['canopy',.9273,.8],['between-shrubs',-.85,-.14]]:[['canopy',.9273,.8],['stream',.75,-.2],['rocky-bed',.68,-.61],['between-shrubs',-.85,-.14]];
 const sourceFiles=['src/atmosphere.js','src/environment.js','src/world.js','src/stream-water.js','src/streambed.js'];
+// Include integrated foliage dependencies and the loaded build entry in provenance.
+sourceFiles.push('src/foliage-mipmaps.js','src/clutter.js','dist/index.html');
 const fingerprint=async()=>Object.fromEntries(await Promise.all(sourceFiles.map(async file=>[file,createHash('sha256').update(await fs.readFile(file)).digest('hex')])));
 const sourceHashes=await fingerprint();
 const app=await electron.launch({args:['.','--qa','--benchmark'],executablePath:path.resolve('node_modules/electron/dist/electron.exe'),timeout:90000});

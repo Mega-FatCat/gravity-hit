@@ -99,6 +99,7 @@ export class World {
    this.pineBarkPbr={map,normalMap,roughnessMap};
    return this.pineBarkPbr;
   })();
+  this.treeLeafReady=gl.loadAsync('./assets/shrub_01/shrub_01.gltf');
   const tasks=[loadForestDetails(this,gl,texture),
    (async()=>{const model=await gl.loadAsync('./assets/clipper.glb');this.upgradeLighter(model.scene);})(),
    (async()=>{const model=await gl.loadAsync('./assets/bottle.glb');this.upgradeBottle(model.scene);})(),
@@ -108,9 +109,9 @@ export class World {
    (async()=>{const [map,normalMap]=await Promise.all([texture('rock_boulder_dry/diff.jpg',true,2.5),texture('rock_boulder_dry/nor_gl.jpg',false,2.5)]);Object.assign(this.rockMat,{map,normalMap});this.rockMat.normalScale.set(.75,.75);this.rockMat.needsUpdate=true;})(),
    (async()=>{const [map,normalMap]=await Promise.all([texture('bark_brown_02/diff.jpg',true,3),texture('bark_brown_02/nor_gl.jpg',false,3)]);Object.assign(this.barkMat,{map,normalMap});this.barkMat.needsUpdate=true;})(),
    (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/fern_02/fern_02.gltf'),gl.loadAsync('./assets/fern_02_lod.glb')]);plantFerns(this,model.scene,lod.scene);})(),
-   (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/shrub_04/shrub_04.gltf'),gl.loadAsync('./assets/shrub_04_lod.glb')]);this.makeShrubs(model.scene,lod.scene);})(),
+   (async()=>{const [model,lod,broadleaf,broadleafLod,solidBroadleaf]=await Promise.all([gl.loadAsync('./assets/shrub_04/shrub_04.gltf'),gl.loadAsync('./assets/shrub_04_lod.glb'),gl.loadAsync('./assets/shrub_03/shrub_03.gltf'),gl.loadAsync('./assets/shrub_03_lod.glb'),this.treeLeafReady]);this.makeShrubs(model.scene,lod.scene,broadleaf.scene,broadleafLod.scene,solidBroadleaf.scene);})(),
    (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/grass_clumps_lod.glb'),gl.loadAsync('./assets/grass_far_lod.glb')]);plantGrass(this,model.scene,lod.scene);})(),
-   (async()=>{try{const [model]=await Promise.all([gl.loadAsync('./assets/pine.glb'),this.pineBarkReady,...this.foliageAlphaReady]);this.makePines(model.scene);}catch(e){console.warn('Pine LOD unavailable',e.message);}})()
+   (async()=>{try{const [model,leafAsset]=await Promise.all([gl.loadAsync('./assets/pine.glb'),this.treeLeafReady,this.pineBarkReady,...this.foliageAlphaReady]);this.makePines(model.scene,leafAsset.scene);}catch(e){console.warn('Pine LOD unavailable',e.message);}})()
   ];const result=await Promise.allSettled(tasks);this.assetErrors=result.filter(r=>r.status==='rejected').map(r=>String(r.reason));if(this.assetErrors.length)console.error(this.assetErrors);upgradeHeroProps(this);this.renderer.compile(this.scene,this.camera);this._shadowState=null;this.renderer.shadowMap.needsUpdate=true;return this;
  }
  makeGround(){buildForestFloor(this);}
@@ -118,8 +119,8 @@ export class World {
  streamWidth(z){return creekWidth(z);}
  addWind(material,amp=.025){material.onBeforeCompile=shader=>{shader.uniforms.uTime={value:0};shader.uniforms.uWind={value:this.wind};shader.vertexShader='uniform float uTime; uniform float uWind;\n'+shader.vertexShader;shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`#include <begin_vertex>\n float sway = sin(uTime*1.3+position.x*1.8+position.z*.9)*${amp.toFixed(4)}*uWind; transformed.x += sway*max(0.,position.y); transformed.z += sway*.4*max(0.,position.y);`);this.windMats.push(shader);};material.customProgramCacheKey=()=>`wind${amp}`;}
   makeFerns(model){plantFerns(this,model);}
-  makePines(model){plantPines(this,model);}
-  makeShrubs(model,lodModel){plantShrubs(this,model,lodModel);}
+ makePines(model,leafModel=null){plantPines(this,model,false,leafModel);}
+ makeShrubs(model,lodModel,broadleafModel=null,broadleafLod=null,solidBroadleafModel=null){plantShrubs(this,model,lodModel,broadleafModel,broadleafLod,solidBroadleafModel);}
   makeGroundCover(model){plantGrass(this,model);}
   upgradeRocks(model,lodModel){
    const sources=[];model.traverse(o=>{if(o.isMesh)sources.push(o);});

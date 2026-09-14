@@ -14,5 +14,12 @@ test('GH-40 foliage coverage widens only the alpha contour while retaining MSAA 
  assert.equal(material.transparent,false);
  assert.equal(material.depthWrite,true);
  assert.equal(material.alphaToCoverage,true);
- assert.match(material.customProgramCacheKey(),/gh40-leaf-coverage-ramp-1/);
+ // Different contour widths must not reuse a compiled shader. The previous
+ // assertion pinned an internal version string and missed this actual contract.
+ const wider=new T.MeshStandardMaterial({alphaTest:.28,alphaToCoverage:true});
+ foliageRendering(wider,.32,.42,1.0,1.90);
+ assert.notEqual(material.customProgramCacheKey(),wider.customProgramCacheKey());
+ const wideShader={uniforms:{},vertexShader:T.ShaderLib.standard.vertexShader,fragmentShader:T.ShaderLib.standard.fragmentShader};
+ wider.onBeforeCompile(wideShader);
+ assert.match(wideShader.fragmentShader,/fwidth\(diffuseColor\.a\) \* 1\.90/);
 });

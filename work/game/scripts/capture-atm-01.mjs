@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import * as T from 'three';
+import {sampleAtmSunVisibility} from './atm-sun-visibility.mjs';
 import {createCaptureSession,verifyCaptureSet} from './qa-capture.mjs';
 
 const label=process.argv[2]||'candidate';
@@ -24,6 +25,8 @@ if(process.argv.includes('--previous')){
 }
 const outDir=path.resolve('qa/atm-01',label);
 const sourceFiles=['src/atmosphere.js','src/world.js','src/stream-water.js','src/streambed.js','src/environment.js','src/foliage-rendering.js','src/edge-quality.js','src/final-edge-pass.js','src/props.js','src/smoke.js'];
+// Include integrated foliage dependencies and the loaded build entry in provenance.
+sourceFiles.push('src/foliage-mipmaps.js','src/clutter.js','dist/index.html');
 const fingerprint=async()=>Object.fromEntries(await Promise.all(sourceFiles.map(async file=>[file,createHash('sha256').update(await fs.readFile(file)).digest('hex')])));
 const sourceHashes=await fingerprint();
 const app=await electron.launch({args:['.','--qa','--benchmark'],executablePath:path.resolve('node_modules/electron/dist/electron.exe'),timeout:90000});
@@ -36,7 +39,7 @@ try{
  await page.evaluate(async()=>{const g=window.__game;await g.world.ready;g.begin();g.settings.quality='medium';g.settings.weather='clear';g.world.setQuality('medium');g.setState({phase:'free',mode:'idle',held:null,supporting:null,water:.3,cap:true,prep:2,tutorial:false});});
  await page.waitForTimeout(3000);
  const session=await createCaptureSession({outDir,page,minTriangles:1000,minCalls:1});
- const views=[['01-sun-through-canopy',.9273,.8],['02-sun-blocked',.9273,.8,[-2.5,2.8,1]],['03-partial-exposure',.9273,.8,[-1,.98,1]],['04-perpendicular',-.64,.1],['05-dense-forest',2.5,.18],['06-stream',.75,-.2],['07-rocky-streambed',.68,-.61],['08-hero-props',0,-.265]];
+ const views=[['01-sun-through-canopy',.9273,.8],['02-sun-blocked',.9273,.8,[-3.8,2.8,1]],['03-partial-exposure',.9273,.8,[-3.4,2.8,1]],['04-perpendicular',-.64,.1],['05-dense-forest',2.5,.18],['06-stream',.75,-.2],['07-rocky-streambed',.68,-.61],['08-hero-props',0,-.265]];
  if(expanded)views.push(
   ['11-ground-under-sun',.9273,-.55],
   ['12-between-shrubs',-.85,-.14],
@@ -44,12 +47,13 @@ try{
   ['14-away-from-sun',-2.2,-.23],
   ['15-near-forest-floor',2.55,-.62]
  );
- const samples=[];
+ const samples=[],solarVisibility=[];
  for(const [name,yaw,pitch,camera=[0,.98,2.65]]of views){
   await page.evaluate(({yaw,pitch,camera})=>{window.__game.world.baseCam.fromArray(camera);window.__game.setView(yaw,pitch);},{yaw,pitch,camera});
   await page.waitForTimeout(800);
-  await page.evaluate(()=>{window.__game.openMenu();document.getElementById('modal').classList.add('hidden');});
+  await page.evaluate(()=>{window.__game.openMenu();window.__game.world.time=3;document.getElementById('modal').classList.add('hidden');});
   await session.capture(name,{view:{yaw,pitch,camera},state:{phase:'free',mode:'idle',atmosphere:true}});
+  if(name.startsWith('01-')||name.startsWith('02-')||name.startsWith('03-'))solarVisibility.push({name,camera,visibility:await sampleAtmSunVisibility(page)});
   if(previousShaders){
    await page.evaluate(shaders=>{
     const w=window.__game.world,a=w.atmosphere,m=a._volumeMesh.material,p=a.pollen.material,c=a._compositeMaterial;
@@ -99,7 +103,7 @@ try{
  const changedSources=Object.keys(sourceHashes).filter(file=>sourceHashes[file]!==sourceHashesEnd[file]);
  const allowedConcurrent=rocksInProgress?['src/streambed.js','src/world.js']:[];
  if(changedSources.some(file=>!allowedConcurrent.includes(file)))throw Error('ATM/protected source changed during captures: '+changedSources.join(', '));
- const manifest=await session.finalize({errors,extraMeta:{scope:'ATM-01 fresh camera fixtures; blocked and partial cameras chosen from actual depth probes',rockConstructionExcluded:rocksInProgress,concurrentSourceChanges:changedSources,previousShaderSourceHash:previousShaders?.sourceHash??null,sourceHashes,sourceHashesEnd,samples,qualityChecks}});
+ const manifest=await session.finalize({errors,extraMeta:{scope:'ATM-01 fresh camera fixtures; blocked and partial cameras chosen from actual depth probes',rockConstructionExcluded:rocksInProgress,concurrentSourceChanges:changedSources,previousShaderSourceHash:previousShaders?.sourceHash??null,sourceHashes,sourceHashesEnd,samples,solarVisibility,qualityChecks}});
  await fs.writeFile(path.join(outDir,'performance.json'),JSON.stringify(samples,null,2));
  console.log(JSON.stringify({summary:manifest.summary,verification:await verifyCaptureSet(outDir),errors}));
  if(errors.length)throw Error('Runtime errors in ATM-01 captures');

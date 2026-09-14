@@ -23,12 +23,13 @@ export const foliageCoverage = `
 // A thin-leaf approximation, not transparency. Reuse the light *after* its
 // shadow lookup so an occluded leaf cannot glow through an opaque neighbour.
 // The bounded wrap redistributes front diffuse instead of adding another sun.
-export function foliageRendering(material, transmission = 0.32, skyTransmission = 0.42, transmissionColorPower = 1.0) {
+export function foliageRendering(material, transmission = 0.32, skyTransmission = 0.42, transmissionColorPower = 1.0, coverageScale = 1.35) {
  material.userData.foliage=true;
  const compile=material.onBeforeCompile,key=material.customProgramCacheKey();
  material.onBeforeCompile=function(shader,renderer){
   compile.call(this,shader,renderer);
-  shader.fragmentShader=shader.fragmentShader.replace('#include <alphatest_fragment>',foliageCoverage);
+  const materialCoverage=foliageCoverage.replace('fwidth(diffuseColor.a) * 1.35',`fwidth(diffuseColor.a) * ${coverageScale.toFixed(2)}`);
+  shader.fragmentShader=shader.fragmentShader.replace('#include <alphatest_fragment>',materialCoverage);
   const begin=ShaderChunk.lights_fragment_begin;
   const start=begin.indexOf('#if ( NUM_DIR_LIGHTS > 0 )');
   const end=begin.indexOf('#if ( NUM_RECT_AREA_LIGHTS > 0 )',start);
@@ -61,14 +62,20 @@ export function foliageRendering(material, transmission = 0.32, skyTransmission 
     #endif
    `);
   };
- material.customProgramCacheKey=()=>`${key}:gh40-leaf-coverage-ramp-1:${transmission}:${skyTransmission}:${transmissionColorPower}`;
+ material.customProgramCacheKey=()=>`${key}:gh40-leaf-coverage-ramp-2:${transmission}:${skyTransmission}:${transmissionColorPower}:${coverageScale}`;
  return specularAntialiasing(material);
 }
 
 // Three r180 substitutes a fixed .5 shadow cutoff for A2C. Keep the shadow
 // contour consistent with our material cutoff, without multisampling shadows.
 export function foliageDepthMaterial(material,world) {
- const depth=new MeshDepthMaterial({depthPacking:RGBADepthPacking});
+ const depth=new MeshDepthMaterial({
+  depthPacking:RGBADepthPacking,
+  map:material.map??null,
+  alphaMap:material.alphaMap??null,
+  alphaTest:material.alphaTest,
+  side:material.side
+ });
  if(world&&material.userData.foliageWind)world.addWind(depth,material.userData.foliageWind);
  const compile=depth.onBeforeCompile,key=depth.customProgramCacheKey();
  depth.onBeforeCompile=shader=>{

@@ -28,6 +28,28 @@ export const ATMOSPHERE_PHYSICS=Object.freeze({
  samplePower:1.38,
  });
 
+// These controls shape how the existing physical shadow visibility is
+// presented. They are intentionally separate from ATMOSPHERE_PHYSICS: the
+// gap lift is an artistic radiance gain for readable shafts, not a claim of
+// fully physical transport. The volume compare is kept tighter than the
+// former .00035 guard so a narrow illuminated column is not eaten away by a
+// roughly 3 cm normalized-depth margin in the 89 m shadow camera range.
+export const ATMOSPHERE_ARTISTIC=Object.freeze({
+ volumeShadowBias:.00012,
+ canopyGapGain:2.4,
+ canopyGapMax:3.0,
+ canopyGapPower:.72,
+ canopyGapEdgeLow:.34,
+ canopyGapEdgeHigh:.62,
+ canopyGapNearStart:.35,
+ canopyGapNearEnd:1.0,
+ canopyGapFarStart:5.0,
+ canopyGapFarEnd:8.0,
+ canopyGapFarScale:.22,
+ pollenShadedFloor:.045,
+ pollenAlpha:.72,
+ });
+
 // These points are generated inside this module so the original world RNG
 // stream and its 180 authored positions remain untouched. They are small,
 // player-near understory dust particles, rather than a second visual effect.
@@ -136,7 +158,7 @@ vec2 atmoShadowVisibility(vec3 worldPosition){
  float inside=step(0.0,uv.x)*step(uv.x,1.0)*step(0.0,uv.y)*step(uv.y,1.0)*step(0.0,z)*step(z,1.0);
  if(inside<.5)return vec2(0.0);
  vec2 texel=1.0/max(vec2(1.0),uShadowMapSize);
- float compare=z+.00035;
+ float compare=z+${ATMOSPHERE_ARTISTIC.volumeShadowBias.toFixed(5)};
  float lit=0.0;
  lit+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv)))*.36;
  lit+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv+vec2(texel.x,0.0))))*.16;
@@ -203,11 +225,22 @@ void main(){
   float g=.20;
   float hg=(1.0-g*g)/pow(max(.001,1.0+g*g-2.0*g*phaseCos),1.5);
   float phase=mix(1.0,hg,.50);
-  float gapLight=shadow.y;
-  // The clearing immediately around the camera is broadly sunlit. Keep that
-  // contribution quiet so it cannot veil every tree; the existing light-space
-  // canopy-gap contrast carries the visible shafts farther along each ray.
-  float direct=clamp(.008+shadow.x*.13+gapLight*.85,0.0,1.0);
+ float gapLight=clamp(shadow.y,0.0,1.0);
+  // The clearing immediately around the camera is broadly sunlit. Keep its
+  // base contribution quiet, then lift only a genuinely lit sample whose
+  // four-tap neighborhood is interrupted by real shadow. The common .25
+  // coverage value is an edge between foliage layers, so it must not become
+  // a full-frame airlight source; stronger breaks retain the original source
+  // response and receive the bounded artistic lift below.
+  float gapSource=smoothstep(${ATMOSPHERE_ARTISTIC.canopyGapEdgeLow.toFixed(2)},.72,gapLight)*pow(gapLight,1.20);
+  float baseDirect=clamp(.008+shadow.x*.13+gapSource*.85,0.0,1.0);
+ float gapEdge=smoothstep(${ATMOSPHERE_ARTISTIC.canopyGapEdgeLow.toFixed(2)},${ATMOSPHERE_ARTISTIC.canopyGapEdgeHigh.toFixed(2)},gapLight);
+ float gapLit=smoothstep(.35,.85,shadow.x);
+ float gapPath=smoothstep(${ATMOSPHERE_ARTISTIC.canopyGapNearStart.toFixed(2)},${ATMOSPHERE_ARTISTIC.canopyGapNearEnd.toFixed(2)},t);
+ gapPath*=1.0-${(1-ATMOSPHERE_ARTISTIC.canopyGapFarScale).toFixed(2)}*smoothstep(${ATMOSPHERE_ARTISTIC.canopyGapFarStart.toFixed(2)},${ATMOSPHERE_ARTISTIC.canopyGapFarEnd.toFixed(2)},t);
+ float gapContrast=gapEdge*pow(gapLight,${ATMOSPHERE_ARTISTIC.canopyGapPower.toFixed(2)})*gapLit*gapPath;
+ float artisticSunScatteringGain=min(${ATMOSPHERE_ARTISTIC.canopyGapMax.toFixed(2)},1.0+${ATMOSPHERE_ARTISTIC.canopyGapGain.toFixed(2)}*gapContrast);
+ float direct=baseDirect*artisticSunScatteringGain;
   float segmentTrans=exp(-sigmaT*segmentLength);
   float scatterWeight=(1.0-segmentTrans)*(sigmaS/max(.00001,sigmaT))*mediumEnabled;
   vec3 tint=uSunColor*uSunIntensity;
@@ -373,8 +406,13 @@ float pollenShadow(vec3 p){
  if(uHasShadow<.5)return .62;
  vec4 sc=uShadowMatrix*vec4(p,1.0);sc.xyz/=max(.000001,sc.w);
  if(sc.x<0.0||sc.x>1.0||sc.y<0.0||sc.y>1.0||sc.z<0.0||sc.z>1.0)return 0.0;
- float stored=atmoUnpackRGBAToDepth(texture2D(uShadowMap,sc.xy));
- float lit=step(sc.z+.00035,stored);
+ vec2 texel=1.0/max(vec2(1.0),uShadowMapSize);
+ float compare=sc.z+${ATMOSPHERE_ARTISTIC.volumeShadowBias.toFixed(5)};
+ float lit=.36*step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,sc.xy)));
+ lit+=.16*step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,sc.xy+vec2(texel.x,0.0))));
+ lit+=.16*step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,sc.xy-vec2(texel.x,0.0))));
+ lit+=.16*step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,sc.xy+vec2(0.0,texel.y))));
+ lit+=.16*step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,sc.xy-vec2(0.0,texel.y))));
  float edge=min(min(sc.x,1.0-sc.x),min(sc.y,1.0-sc.y));
  return lit*smoothstep(.015,.12,edge);
 }
@@ -392,15 +430,20 @@ void main(){
  float shadow=pollenShadow(worldPosition.xyz);
  float upLight=max(.0,uSunDirection.y);
  float field=atmoMediumField(worldPosition.xyz);
- float lightResponse=.22+.78*(.22+.78*shadow)*(.70+.30*upLight);
- vIllum=clamp(lightResponse*field,.12,1.0);
+ // Keep shaded grains barely present while giving genuinely lit grains a
+ // compact, warm catchlight. The fractional power recovers useful sparkle
+ // from the partial .16--.25 shadow values without making fully shadowed
+ // grains look like snow or fireflies.
+ float litResponse=pow(clamp(shadow,0.0,1.0),.62);
+ float lightResponse=${ATMOSPHERE_ARTISTIC.pollenShadedFloor.toFixed(3)}+(1.0-${ATMOSPHERE_ARTISTIC.pollenShadedFloor.toFixed(3)})*litResponse*(.68+.32*upLight);
+ vIllum=clamp(lightResponse*field,${ATMOSPHERE_ARTISTIC.pollenShadedFloor.toFixed(3)},1.0);
 }
 `,
    fragmentShader:`
 varying float vIllum;
 void main(){
  float d=length(gl_PointCoord-vec2(.5));
- float alpha=(1.0-smoothstep(.08,.5,d))*.42*vIllum;
+ float alpha=(1.0-smoothstep(.08,.5,d))*${ATMOSPHERE_ARTISTIC.pollenAlpha.toFixed(2)}*vIllum;
  if(alpha<.012)discard;
  gl_FragColor=vec4(vec3(.92,.86,.62)*(.72+.28*vIllum),alpha);
  #include <colorspace_fragment>
