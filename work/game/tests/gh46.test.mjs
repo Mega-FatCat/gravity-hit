@@ -305,7 +305,7 @@ test('GH-46 [11]: Hit mechanics, water filtration, cough, and residue', () => {
   assert.equal(sDry.cough, 1.0, 'Dry hit must produce harsh cough');
 });
 
-test('GH-46 [12] & [13]: Repeated cycles, Day 1 depletion, and sleep transition', () => {
+test('GH-46 [12] & [13]: Repeated cycles, stock depletion, and staying in free phase', () => {
   const s = new Simulation({phase: 'free', prep: 2, outlet: true, cap: false});
   for (let i = 0; i < 9; i++) {
     s.action('bag');
@@ -333,39 +333,54 @@ test('GH-46 [12] & [13]: Repeated cycles, Day 1 depletion, and sleep transition'
   assert.equal(s.stock, 0);
   assert.equal(s.lost, 1);
 
-  // Day 1 depletion triggers sleep
+  // Depletion leaves simulation in free phase without sleep
   advance(s, 0.5);
-  assert.equal(s.phase, 'sleep', 'Exhausting all 10 charges must trigger sleep phase');
+  assert.equal(s.phase, 'free', 'Exhausting all 10 charges leaves phase free');
 });
 
-test('GH-46 [14] & [15]: Sleep duration and Day 2 automatic state upgrade', () => {
-  const s = new Simulation({phase: 'sleep', stock: 0, hits: 9, lost: 1, prep: 2, outlet: true});
-  advance(s, 3);
-  assert.equal(s.phase, 'sleep');
-
-  advance(s, 5);
+test('GH-46 [14] & [15]: Stock depletion, refill replenishment, and manual ritual continuity', () => {
+  const s = new Simulation({phase: 'free', stock: 0, hits: 9, lost: 1, prep: 2, outlet: true, cap: false});
   assert.equal(s.phase, 'free');
-  assert.equal(s.day, 2);
-  assert.equal(s.stock, 1000, 'Day 2 contractor bag must provide 1000 charges');
+  assert.equal(s.stock, 0);
 
-  // Automated Day 2 actions (single clicks)
-  s.action('bag');
+  // Attempting to pack empty bag is rejected
+  assert.equal(s.action('bag'), false);
+  assert.equal(s.pack(true), false);
+
+  // Refill restores 10 charges
+  assert.equal(s.refill(), true);
+  assert.equal(s.stock, 10);
+
+  // Manual loading works normally
+  assert.equal(s.action('bag'), true);
+  assert.equal(s.pack(true), true);
+  assert.equal(s.stock, 9);
   assert.equal(s.bud, 1);
-  assert.equal(s.stock, 999);
 
+  // Physical continuity preserved
   s.action('bottle');
   s.action('stream');
-  assert.equal(s.water, 1);
-  assert.equal(s.seal, true);
+  advance(s, 4, {fire: true, aim: 1, seal: true});
+  assert.equal(s.water >= 0.9, true);
 
-  s.action('bottle');
+  s.action('pipe');
+  advance(s, 2.5, {right: true, seal: true});
   assert.equal(s.cap, true);
 
   s.action('lighter');
-  assert.equal(s.mode, 'auto');
-  advance(s, 20);
+  s.angle = 45;
+  advance(s, 5, {fire: true, aim: 1, seal: false});
+  assert.equal(s.smoke > 0.1, true);
+
+  s.action('bottle');
+  advance(s, 2.5, {left: true, seal: true});
+  assert.equal(s.cap, false);
+
+  assert.equal(s.action('hit'), true);
+  advance(s, 5);
   assert.equal(s.hits, 10);
   assert.equal(s.phase, 'free');
+  assertInvariants(s, 'Cycle after refill');
 });
 
 test('GH-46 [16], [17], [18]: Tutorial, settings, and full save/restore parity', () => {

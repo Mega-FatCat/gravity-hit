@@ -96,17 +96,18 @@ try{
  await page.keyboard.press('Escape');await page.click('[data-tab="world"]');await page.locator('[data-setting="quality"]').selectOption('medium');await page.click('#resume');checks.push('Tutorial toggle and settings remain usable');
  await reloadAndCheck();
  if(full){
-  await pack(false);checks.push('Missed charge is permanently lost');
-  while((await state()).stock>0){await cycle();console.log('Charge completed:',JSON.stringify(await state()));}
-  assert.equal((await state()).hits,9);assert.equal((await state()).lost,1);await wait(()=>window.__game.sim.day===2,20000);
-  assert.equal((await state()).stock,1000);await screenshot('second-morning');checks.push('All ten Day 1 charges accounted for; sleep reaches upgraded morning');
-  await page.click('#slot-bag');await page.click('#slot-bottle');await page.click('#slot-stream');await page.click('#slot-bottle');await page.click('#slot-lighter');
-  await wait(()=>window.__game.sim.hits===10,30000);await wait(()=>window.__game.sim.phase==='free',10000);assert.equal((await state()).stock,999);
-  checks.push('Second-day clicks complete automatic hit');await reloadAndCheck();
+   await pack(false);checks.push('Missed charge is permanently lost');
+   while((await state()).stock>0){await cycle();console.log('Charge completed:',JSON.stringify(await state()));}
+   assert.equal((await state()).hits,9);assert.equal((await state()).lost,1);
+   assert.equal((await state()).stock,0);
+   checks.push('All ten charges accounted for; supply depletes without sleep transition');
+   await page.click('#refill-btn');
+   assert.equal((await state()).stock,10);
+   checks.push('Refill button restores 10 charges');
+   await reloadAndCheck();
  }
  const final=await state();await screenshot('after-hit');await page.evaluate(()=>window.__game.save());
  if(errors.length)throw Error('Runtime errors: '+errors.join('; '));
  const result={checks,final,worldClicks,errors};console.log(JSON.stringify(result,null,2));await fs.writeFile(path.join(out,'result.json'),JSON.stringify(result,null,2));
 }catch(error){await screenshot('failure').catch(()=>{});const failed={checks,state:await state().catch(()=>null),mode:await readMode().catch(()=>null),worldClicks,error:error.message,errors};console.log('PLAYTEST FAILED',JSON.stringify(failed,null,2));await fs.writeFile(path.join(out,'result.json'),JSON.stringify(failed,null,2));process.exitCode=1;}
 finally{await app.close();}
-

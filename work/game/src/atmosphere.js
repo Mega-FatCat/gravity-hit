@@ -20,12 +20,12 @@ const QUALITY=ATMOSPHERE_QUALITY;
 // background attenuation; this pass adds the integrated sun radiance.
 export const ATMOSPHERE_PHYSICS=Object.freeze({
  clipDistance:.05,
- extinction:.025,
- albedo:.74,
+ extinction:.028,
+ albedo:.78,
  heightReference:.15,
- heightFalloff:.48,
- distanceFalloff:.032,
- samplePower:1.38,
+ heightFalloff:.08,
+ distanceFalloff:.018,
+ samplePower:1.25,
  });
 
 // These controls shape how the existing physical shadow visibility is
@@ -69,9 +69,9 @@ float atmoNoise3(vec3 p){
  return mix(mix(mix(n000,n100,f.x),mix(n010,n110,f.x),f.y),mix(mix(n001,n101,f.x),mix(n011,n111,f.x),f.y),f.z);
 }
 float atmoMediumField(vec3 p){
- float broad=atmoNoise3(p*vec3(.12,.09,.12)+vec3(3.0,-.5,9.0));
- float detail=atmoNoise3(p*vec3(.28,.22,.28)-vec3(7.0,2.0,4.0));
- return clamp(.82+.30*(broad-.5)+.10*(detail-.5),.48,1.10);
+ float broad=atmoNoise3(p*vec3(.08,.06,.08)+vec3(3.0,-.5,9.0));
+ float detail=atmoNoise3(p*vec3(.18,.15,.18)-vec3(7.0,2.0,4.0));
+ return clamp(.82+.28*(broad-.5)+.10*(detail-.5),.60,1.15);
 }
 `;
 
@@ -145,41 +145,36 @@ vec3 atmoWorldFromClip(vec3 clip){
 
 ${MEDIUM_FIELD_GLSL}
 
-// The map is the same RGBA packed depth representation used by Three r180's
-// shadowmap_pars_fragment chunk. A five tap PCF footprint is enough to soften
-// shafts at the existing PCFSoft shadow-map resolution without multiplying the
-// full 17-tap surface-lighting lookup across every ray step.
-vec2 atmoShadowVisibility(vec3 worldPosition){
- if(uHasShadow<.5)return vec2(.62);
+// Smooth rotated Poisson PCF shadow lookup in the packed RGBA shadow map.
+// Eliminates the axis-aligned cross offsets that caused artificial grid/mesh
+// artifacts on foliage, providing natural, soft sunbeam penumbras.
+float atmoShadowVisibility(vec3 worldPosition, float rot){
+ if(uHasShadow<.5)return .62;
  vec4 sc=uShadowMatrix*vec4(worldPosition,1.0);
  sc.xyz/=max(.000001,sc.w);
- vec2 uv=sc.xy;
- float z=sc.z;
- float inside=step(0.0,uv.x)*step(uv.x,1.0)*step(0.0,uv.y)*step(uv.y,1.0)*step(0.0,z)*step(z,1.0);
- if(inside<.5)return vec2(0.0);
+ if(sc.x<0.0||sc.x>1.0||sc.y<0.0||sc.y>1.0||sc.z<0.0||sc.z>1.0)return 0.0;
+ 
  vec2 texel=1.0/max(vec2(1.0),uShadowMapSize);
- float compare=z+${ATMOSPHERE_ARTISTIC.volumeShadowBias.toFixed(5)};
+ float compare=sc.z+${ATMOSPHERE_ARTISTIC.volumeShadowBias.toFixed(5)};
+ 
+ float s=sin(rot),c=cos(rot);
+ mat2 r=mat2(c,-s,s,c);
+ vec2 p1=r*vec2( 0.7071,  0.7071)*texel*1.5;
+ vec2 p2=r*vec2(-0.7071,  0.7071)*texel*1.5;
+ vec2 p3=r*vec2(-0.7071, -0.7071)*texel*1.5;
+ vec2 p4=r*vec2( 0.7071, -0.7071)*texel*1.5;
+ 
  float lit=0.0;
- lit+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv)))*.36;
- lit+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv+vec2(texel.x,0.0))))*.16;
- lit+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv-vec2(texel.x,0.0))))*.16;
- lit+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv+vec2(0.0,texel.y))))*.16;
- lit+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv-vec2(0.0,texel.y))))*.16;
- // Fade toward the finite shadow camera boundary instead of producing a
- // hard unshadowed seam where the frustum ends.
- float edge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
+ lit+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,sc.xy+p1)));
+ lit+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,sc.xy+p2)));
+ lit+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,sc.xy+p3)));
+ lit+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,sc.xy+p4)));
+ lit*=.25;
+ 
+ float edge=min(min(sc.x,1.0-sc.x),min(sc.y,1.0-sc.y));
  float edgeFade=smoothstep(.015,.12,edge);
- edgeFade*=smoothstep(.015,.12,z)*(1.0-smoothstep(.84,.985,z));
- // Existing distance fog supplies the uniform airlight. Emphasize narrow
- // illuminated gaps surrounded by real canopy shadows, rather than raising
- // haze everywhere in the open clearing. This light-space footprint moves
- // with the actual sun and its casters, independently of the camera.
- vec2 gapOffset=texel*44.0;
- float nearby=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv+vec2(gapOffset.x,0.0))));
- nearby+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv-vec2(gapOffset.x,0.0))));
- nearby+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv+vec2(0.0,gapOffset.y))));
- nearby+=step(compare,atmoUnpackRGBAToDepth(texture2D(uShadowMap,uv-vec2(0.0,gapOffset.y))));
- return vec2(lit*edgeFade,(1.0-nearby*.25)*lit*edgeFade);
+ edgeFade*=smoothstep(.015,.12,sc.z)*(1.0-smoothstep(.84,.985,sc.z));
+ return lit*edgeFade;
 }
 
 void main(){
@@ -200,54 +195,49 @@ void main(){
  float mediumEnabled=step(.000001,pathDistance);
  float optical=0.0;
  vec3 scattered=vec3(0.0);
- // Fixed midpoint samples are intentional: camera movement must not produce
- // temporal shimmer in the shafts or a noisy, animated sky.
+ 
+ // Interleaved gradient noise for silky-smooth jitter along the ray.
+ // Eliminates concentric slicing shells and moirÃ© striping across foliage!
+ float jitter=fract(52.9829189*fract(dot(gl_FragCoord.xy,vec2(0.06711056,0.00583715))));
+ 
+ float phaseCos=dot(rayDirection,uSunDirection);
+ float g=0.20;
+ float hg=(1.0-g*g)/pow(max(.01,1.0+g*g-2.0*g*phaseCos),1.5);
+ // Keep the selected broad, mean-one phase response. A stronger forward lobe
+ // overwhelms the canopy detail in views toward the sun.
+ float phase=mix(1.0,hg,0.50);
+ 
  for(int i=0;i<${samples};i++){
   float u0=float(i)/float(${samples});
   float u1=float(i+1)/float(${samples});
-  // A power-law parameterization spends more samples in the first few metres
-  // where the player sees ground, stream edges and inter-shrub air columns.
   float t0=clipDistance+pathDistance*pow(u0,${ATMOSPHERE_PHYSICS.samplePower.toFixed(2)});
   float t1=clipDistance+pathDistance*pow(u1,${ATMOSPHERE_PHYSICS.samplePower.toFixed(2)});
-  float t=.5*(t0+t1);
+  float t=mix(t0,t1,jitter);
   float segmentLength=max(.0001,t1-t0);
   vec3 p=rayOrigin+rayDirection*t;
-  float heightDensity=exp(-max(p.y-${ATMOSPHERE_PHYSICS.heightReference.toFixed(2)},0.0)*${ATMOSPHERE_PHYSICS.heightFalloff.toFixed(2)});
+  
+  float heightDensity=exp(-max(p.y-${ATMOSPHERE_PHYSICS.heightReference.toFixed(2)},0.0)*${ATMOSPHERE_PHYSICS.heightFalloff.toFixed(3)});
   float distanceFade=exp(-t*${ATMOSPHERE_PHYSICS.distanceFalloff.toFixed(3)});
   float aerosol=atmoMediumField(p);
-  vec2 shadow=atmoShadowVisibility(p);
-  // Aerosol exists continuously in ground and canopy air. Shadows only
-  // modulate the light reaching it, so downward and side-lit rays retain a
-  // coherent short-path presence instead of disappearing in gaps.
+  
+  float rot=jitter*6.2831853+float(i)*1.5707963;
+  float sunLit=atmoShadowVisibility(p,rot);
+  
+  // Keep direct radiance close to the previously selected level while retaining
+  // a small shadow floor and clear contrast where the rotated PCF finds sun.
+  float directLight=0.01+0.17*sunLit;
+  
   float sigmaT=${ATMOSPHERE_PHYSICS.extinction.toFixed(4)}*aerosol*heightDensity*distanceFade;
   float sigmaS=sigmaT*${ATMOSPHERE_PHYSICS.albedo.toFixed(2)};
-  float phaseCos=dot(rayDirection,uSunDirection);
-  float g=.20;
-  float hg=(1.0-g*g)/pow(max(.001,1.0+g*g-2.0*g*phaseCos),1.5);
-  float phase=mix(1.0,hg,.50);
- float gapLight=clamp(shadow.y,0.0,1.0);
-  // The clearing immediately around the camera is broadly sunlit. Keep its
-  // base contribution quiet, then lift only a genuinely lit sample whose
-  // four-tap neighborhood is interrupted by real shadow. The common .25
-  // coverage value is an edge between foliage layers, so it must not become
-  // a full-frame airlight source; stronger breaks retain the original source
-  // response and receive the bounded artistic lift below.
-  float gapSource=smoothstep(${ATMOSPHERE_ARTISTIC.canopyGapEdgeLow.toFixed(2)},.72,gapLight)*pow(gapLight,1.20);
-  float baseDirect=clamp(.008+shadow.x*.13+gapSource*.85,0.0,1.0);
- float gapEdge=smoothstep(${ATMOSPHERE_ARTISTIC.canopyGapEdgeLow.toFixed(2)},${ATMOSPHERE_ARTISTIC.canopyGapEdgeHigh.toFixed(2)},gapLight);
- float gapLit=smoothstep(.35,.85,shadow.x);
- float gapPath=smoothstep(${ATMOSPHERE_ARTISTIC.canopyGapNearStart.toFixed(2)},${ATMOSPHERE_ARTISTIC.canopyGapNearEnd.toFixed(2)},t);
- gapPath*=1.0-${(1-ATMOSPHERE_ARTISTIC.canopyGapFarScale).toFixed(2)}*smoothstep(${ATMOSPHERE_ARTISTIC.canopyGapFarStart.toFixed(2)},${ATMOSPHERE_ARTISTIC.canopyGapFarEnd.toFixed(2)},t);
- float gapContrast=gapEdge*pow(gapLight,${ATMOSPHERE_ARTISTIC.canopyGapPower.toFixed(2)})*gapLit*gapPath;
- float artisticSunScatteringGain=min(${ATMOSPHERE_ARTISTIC.canopyGapMax.toFixed(2)},1.0+${ATMOSPHERE_ARTISTIC.canopyGapGain.toFixed(2)}*gapContrast);
- float direct=baseDirect*artisticSunScatteringGain;
+  
   float segmentTrans=exp(-sigmaT*segmentLength);
   float scatterWeight=(1.0-segmentTrans)*(sigmaS/max(.00001,sigmaT))*mediumEnabled;
   vec3 tint=uSunColor*uSunIntensity;
-  scattered+=(1.0-optical)*scatterWeight*tint*phase*direct;
+  
+  scattered+=(1.0-optical)*scatterWeight*tint*phase*directLight;
   optical=1.0-segmentTrans*(1.0-optical);
  }
-
+ 
  gl_FragColor=vec4(scattered,sceneDepthMetric);
 }
 `;
@@ -279,13 +269,23 @@ vec4 atmoSample(vec2 uv,float sceneDepth){
   vec2 corner=vec2(float(x),float(y));
   vec2 p=clamp((base+corner+.5)*texel,texel*.5,1.0-texel*.5);
   vec4 s=texture2D(atmosphereTexture,p);
-  float depthWeight=exp(-abs(s.a-sceneDepth)*atmosphereCameraRange.y/(.10+.03*sceneDepth*atmosphereCameraRange.y));
+  float dDiff=abs(s.a-sceneDepth)*atmosphereCameraRange.y;
+  // Smooth Lorentzian depth weight: high for matching depths, falls off gracefully without hard step-functions or blocky edges
+  float depthWeight=1.0/(1.0+dDiff*2.0);
   vec2 weightXY=mix(1.0-blend,blend,corner);
   float weight=weightXY.x*weightXY.y*depthWeight;
   sum+=s*weight;
   total+=weight;
  }
- return sum/max(.0001,total);
+ if(total>0.001){
+  return sum/total;
+ }
+ // Seamless bilinear fallback for fine leaf/silhouette boundaries
+ vec4 s00=texture2D(atmosphereTexture,clamp((base+vec2(.5,.5))*texel,texel*.5,1.0-texel*.5));
+ vec4 s10=texture2D(atmosphereTexture,clamp((base+vec2(1.5,.5))*texel,texel*.5,1.0-texel*.5));
+ vec4 s01=texture2D(atmosphereTexture,clamp((base+vec2(.5,1.5))*texel,texel*.5,1.0-texel*.5));
+ vec4 s11=texture2D(atmosphereTexture,clamp((base+vec2(1.5,1.5))*texel,texel*.5,1.0-texel*.5));
+ return mix(mix(s00,s10,blend.x),mix(s01,s11,blend.x),blend.y);
 }
 `;
 

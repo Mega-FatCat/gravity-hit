@@ -1,0 +1,62 @@
+{
+  "bottle_hero.glb": {
+    "objects": 8,
+    "triangles": 54496
+  },
+  "cap_spare.glb": {
+    "objects": 49,
+    "triangles": 2880
+  },
+  "pipe_hero.glb": {
+    "objects": 56,
+    "triangles": 12224
+  },
+  "bag_hero.glb": {
+    "objects": 5,
+    "triangles": 6392
+  },
+  "bottle_cavity.glb": {
+    "objects": 1,
+    "triangles": 12672
+  },
+  "packed_charge.glb": {
+    "objects": 1,
+    "triangles": 2528
+  },
+  "bud_0.glb": {
+    "objects": 1,
+    "triangles": 5052
+  },
+  "bud_1.glb": {
+    "objects": 1,
+    "triangles": 5292
+  },
+  "bud_2.glb": {
+    "objects": 1,
+    "triangles": 5532
+  },
+  "bud_3.glb": {
+    "objects": 1,
+    "triangles": 5772
+  },
+  "bud_4.glb": {
+    "objects": 1,
+    "triangles": 5052
+  },
+  "bud_5.glb": {
+    "objects": 1,
+    "triangles": 5292
+  },
+  "bud_6.glb": {
+    "objects": 1,
+    "triangles": 5532
+  },
+  "bud_7.glb": {
+    "objects": 1,
+    "triangles": 5772
+  },
+  "bud_8.glb": {
+    "objects": 1,
+    "triangles": 5052
+  }
+}

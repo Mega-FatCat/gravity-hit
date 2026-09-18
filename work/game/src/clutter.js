@@ -1,5 +1,5 @@
 import * as T from 'three';
-import { forestHeight, creekX, creekWidth } from './environment.js';
+import { forestHeight, creekX, creekWidth, creekBankMeander } from './environment.js';
 
 const TAU = Math.PI * 2;
 const UP = new T.Vector3(0, 1, 0);
@@ -800,10 +800,30 @@ function scanMaterial(source, world) {
   return m;
 }
 
+function restingScanGeometry(source, branch = false) {
+  const g = source.geometry.clone();
+  g.computeBoundingBox();
+  const size = g.boundingBox.getSize(new T.Vector3());
+  // Scans have assorted authoring axes. Lay rocks on their broad face and
+  // align fallen wood length with the terrain-following local X direction.
+  if (branch) {
+    if (size.y > size.x && size.y > size.z) g.rotateZ(Math.PI * 0.5);
+    else if (size.z > size.x) g.rotateY(Math.PI * 0.5);
+  } else {
+    if (size.x < size.y && size.x < size.z) g.rotateZ(Math.PI * 0.5);
+    else if (size.z < size.y) g.rotateX(Math.PI * 0.5);
+  }
+  g.computeBoundingBox();
+  const center = g.boundingBox.getCenter(new T.Vector3());
+  g.translate(-center.x, -g.boundingBox.min.y, -center.z);
+  g.computeBoundingBox();
+  return g;
+}
+
 /**
  * Natural organic placement generator strictly enforcing gameplay clearances.
  */
-export function generateClutterPlacements({ seed = 91402 } = {}) {
+export function generateClutterPlacements({ seed = 91402, infillOnly = false } = {}) {
   const r = pseudoRandom(seed);
 
   const scannedBranches = [];
@@ -1052,7 +1072,76 @@ export function generateClutterPlacements({ seed = 91402 } = {}) {
     if (r() < 0.35) addElongatedInstance(pineCones, lx - 0.10, lz - 0.08, 0.80, 1.15, 0.065, 0.006);
   }
 
+  // Dry-bank and midground infill. Append after the old generator so every
+  // original prop keeps its seed/transform. Clusters vary in size and spacing;
+  // footprint checks keep even larger copies clear of water and ritual props.
+  if (infillOnly) for (const list of [scannedBranches, sticks, forks, leafClusters, needleTufts, barkFlakes, pebbles, pineCones]) list.length = 0;
+  const groundRocks = [];
+  const fill = pseudoRandom(9172601);
+  const dry = (x, z, radius) => isAllowed(x, z)
+    && Math.hypot(x, z - 0.83) > 1.18 + radius
+    && Math.hypot(x, z - 2.65) > 0.65 + radius
+    && Math.abs(x - creekX(z)) > creekWidth(z) * 0.5 + 0.22 + radius
+    && forestHeight(x, z) > -0.015;
+  const anchors = [];
+  for (let i = 0; i < 78; i++) {
+    const z = -19 + fill() * 33;
+    const side = i % 2 ? 1 : -1;
+    anchors.push([creekX(z) + side * (creekWidth(z) * 0.5 + 0.55 + fill() * 2.6), z]);
+  }
+  for (let i = 0; i < 66; i++) {
+    const angle = fill() * TAU, distance = 3 + Math.sqrt(fill()) * 15;
+    anchors.push([Math.cos(angle) * distance, 2.65 + Math.sin(angle) * distance]);
+  }
+  for (const [ax, az] of anchors) {
+    const members = 2 + Math.floor(fill() * 5);
+    for (let j = 0; j < members; j++) {
+      const angle = fill() * TAU, offset = Math.sqrt(fill()) * 1.15;
+      const x = ax + Math.cos(angle) * offset, z = az + Math.sin(angle) * offset;
+      const size = j === 0 && fill() < 0.29 ? 0.48 + fill() * 0.62 : 0.075 + fill() ** 1.6 * 0.29;
+      if (!dry(x, z, size * 0.55)) continue;
+      if (groundRocks.some(p => Math.hypot(p.x - x, p.z - z) < (p.s + size) * 0.52)) continue;
+      groundRocks.push({x, z, s: size, y: forestHeight(x, z), rot: fill() * TAU, tint: 0.88 + fill() * 0.12});
+    }
+    const x = ax + (fill() - 0.5) * 1.7, z = az + (fill() - 0.5) * 1.7;
+    const size = 0.32 + fill() * 0.58;
+    if (dry(x, z, size * 0.6)) {
+      // Scanned branch copies keep their existing bark maps and full geometry.
+      addElongatedInstance(scannedBranches, x, z, size, size, 1.0, 0.018);
+    }
+    for (let j = 0; j < 2; j++) {
+      const px = ax + (fill() - 0.5) * 2, pz = az + (fill() - 0.5) * 2;
+      if (dry(px, pz, 0.3)) addElongatedInstance(j ? forks : sticks, px, pz, 0.85, 1.55, 0.38, 0.012);
+    }
+  }
+
+  // The rear-view shore is low but exposed (often -0.05m, above the
+  // -0.065m water). The upland dry() cutoff missed this entire bare strip.
+  // Append a local shore pass without resampling any existing placements.
+  const shore = pseudoRandom(9172602);
+  const shoreAllowed = (x, z, radius) => isAllowed(x, z)
+    && Math.hypot(x, z - 2.65) > 0.7 + radius
+    && Math.abs(x - creekX(z) - creekBankMeander(z)) > creekWidth(z) * 0.57 + radius + 0.045
+    && forestHeight(x, z) > -0.055;
+  for (let i = 0; i < 360; i++) {
+    const z = 3.7 + shore() ** 1.3 * 18;
+    const side = i % 2 ? 1 : -1;
+    const size = shore() < 0.09 ? 0.38 + shore() * 0.28 : 0.10 + shore() * 0.23;
+    const x = creekX(z) + creekBankMeander(z) + side * (creekWidth(z) * 0.57 + 0.22 + shore() * 1.2);
+    if (!shoreAllowed(x, z, size * 0.5)) continue;
+    if (groundRocks.some(p => Math.hypot(p.x - x, p.z - z) < (p.s + size) * 0.52)) continue;
+    groundRocks.push({x, z, s: size, y: forestHeight(x, z), rot: shore() * TAU, tint: 0.88 + shore() * 0.12});
+  }
+  for (let i = 0; i < 96; i++) {
+    const z = 3.7 + shore() ** 1.3 * 18, side = i % 2 ? 1 : -1;
+    const size = 0.3 + shore() * 0.35;
+    const x = creekX(z) + creekBankMeander(z) + side * (creekWidth(z) * 0.57 + 0.42 + shore() * 1.15);
+    if (!shoreAllowed(x, z, size * 0.55)) continue;
+    addElongatedInstance(scannedBranches, x, z, size, size, 1.0, 0.018);
+  }
+
   return {
+    groundRocks,
     scannedBranches,
     sticks,
     forks,
@@ -1067,7 +1156,7 @@ export function generateClutterPlacements({ seed = 91402 } = {}) {
 /**
  * Builds all forest-floor clutter systems, batching into InstancedMesh nodes.
  */
-export async function buildForestClutter(world, texture, gl) {
+export async function buildForestClutter(world, texture, gl, {infillOnly = false} = {}) {
   world.clutterVersion = 'gh33-high-resolution-v4';
 
   // 1. Load PBR Scots pine bark textures for realistic branches and bark flakes
@@ -1200,7 +1289,7 @@ export async function buildForestClutter(world, texture, gl) {
   });
 
   // Generate non-uniform placements
-  const placements = generateClutterPlacements({ seed: 91402 });
+  const placements = generateClutterPlacements({ seed: 91402, infillOnly });
 
   function createInstancedBatch(geometry, material, list, name, shadow = false) {
     if (!list.length) return null;
@@ -1222,6 +1311,19 @@ export async function buildForestClutter(world, texture, gl) {
       }
       dummy.scale.set(p.sx ?? p.s, p.sy ?? p.s, p.sz ?? p.s);
       dummy.updateMatrix();
+      if (infillOnly && /Photogrammetry branch|Scanned ground rock/.test(name)) {
+        const position = geometry.attributes.position, point = new T.Vector3(), offsets = [];
+        const stride = Math.max(1, Math.floor(position.count / 96));
+        for (let v = 0; v < position.count; v += stride) {
+          point.fromBufferAttribute(position, v).applyMatrix4(dummy.matrix);
+          offsets.push(forestHeight(point.x, point.z) - point.y);
+        }
+        offsets.sort((a, b) => b - a);
+        // Bury the lowest surface fraction; sample the actual footprint, not
+        // only its centre, so curved branches rest on uneven banks.
+        dummy.position.y += offsets[Math.floor(offsets.length * 0.08)] - 0.008;
+        dummy.updateMatrix();
+      }
       mesh.setMatrixAt(i, dummy.matrix);
 
       const light = p.tint ?? 1.0;
@@ -1243,7 +1345,7 @@ export async function buildForestClutter(world, texture, gl) {
       const branchModel = (await gl.loadAsync('./assets/dry_branches_medium_01/dry_branches_medium_01.gltf')).scene;
       const branchSources = sourceMeshes(branchModel);
       branchSources.forEach((src, i) => {
-        const g = groundedGeometry(src);
+        const g = infillOnly ? restingScanGeometry(src, true) : groundedGeometry(src);
         const m = scanMaterial(src.material, world);
         const sz = g.boundingBox.getSize(new T.Vector3());
         const maxDim = Math.max(sz.x, sz.z);
@@ -1259,6 +1361,27 @@ export async function buildForestClutter(world, texture, gl) {
     } catch {
       // Graceful fallback to procedural sticks
     }
+  }
+
+  // Reuse all six existing moss-rock scans; retain their authored UV/PBR
+  // detail at every size rather than enlarging the tiny procedural pebbles.
+  if (gl && placements.groundRocks.length) {
+    const model = (await gl.loadAsync('./assets/rock_moss_set_01/rock_moss_set_01.gltf')).scene;
+    const sources = sourceMeshes(model);
+    sources.forEach((src, i) => {
+      const geometry = restingScanGeometry(src);
+      const extent = geometry.boundingBox.getSize(new T.Vector3());
+      const width = Math.max(extent.x, extent.z);
+      const material = scanMaterial(src.material, world);
+      material.color.setRGB(0.92, 0.92, 0.88);
+      material.roughness = 0.9;
+      const list = placements.groundRocks.filter((_, j) => j % sources.length === i).map(p => {
+        const s = p.s / width;
+        // Bury the base enough to sit in the bank, with no steep tilted spires.
+        return {...p, s, y: p.y - Math.min(extent.y * s * 0.24, 0.12)};
+      });
+      createInstancedBatch(geometry, material, list, `Forest floor • Scanned ground rock ${i + 1}`, true);
+    });
   }
 
   // 7. Procedural Clutter Batches.  Three geometry families keep repeated
@@ -1288,6 +1411,7 @@ export async function buildForestClutter(world, texture, gl) {
   createInstancedBatch(createPineConeGeometry({ seed: 8923 }), coneMat, placements.pineCones, 'Forest floor • Scots pine cone', true);
 
   world.clutterCounts = {
+    groundRocks: placements.groundRocks.length,
     scannedBranches: placements.scannedBranches.length,
     sticks: placements.sticks.length,
     forks: placements.forks.length,

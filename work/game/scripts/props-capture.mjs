@@ -17,7 +17,7 @@ const errors = [];
 page.on('pageerror', e => errors.push(e.message));
 
 try {
-  await page.waitForFunction(() => !window.__game, null, {timeout: 180000});
+  await page.waitForFunction(() => window.__game && document.querySelector('#begin') && !document.querySelector('#begin').disabled, null, {timeout: 180000});
   await page.click('#begin');
   await page.waitForTimeout(500);
 
@@ -45,16 +45,16 @@ try {
         const g = window.__game, w = g.world, o = w.items[id];
         Object.assign(g.sim, {phase: 'free', mode: 'idle', prep: 0, cap: true, water, smoke, residue, bud: 0, embers: 0, outlet: water > 0});
         for (const [key, item] of Object.entries(w.items)) item.visible = key === id;
-        w.trash.visible = false;
-        w.spareCap.visible = true;
-        w.flame.visible = false;
-        w.flameCore.visible = false;
-        w.hotTip.visible = false;
-        w.bowlBud.visible = false;
-        w.outlet.visible = water > 0;
-        for (const child of w.items.pipe.children) if (child.material === w.capmesh.material) child.visible = false;
-        w.heroProps.update(g.sim);
-        const distance = {bottle: 0.48, pipe: 0.30, lighter: 0.20}[id], center = {bottle: 0.112, pipe: 0.0115, lighter: 0.04}[id];
+        if (w.trash) w.trash.visible = false;
+        if (w.spareCap) w.spareCap.visible = true;
+        if (w.flame) w.flame.visible = false;
+        if (w.flameCore) w.flameCore.visible = false;
+        if (w.hotTip) w.hotTip.visible = false;
+        if (w.bowlBud) w.bowlBud.visible = false;
+        if (w.outlet) w.outlet.visible = water > 0;
+        if (w.items?.pipe) for (const child of w.items.pipe.children) if (w.capmesh && child.material === w.capmesh.material) child.visible = false;
+        if (w.heroProps?.update) w.heroProps.update(g.sim);
+        const distance = {bottle: 0.48, pipe: 0.30, lighter: 0.20, bag: 0.35}[id] || 0.35, center = {bottle: 0.112, pipe: 0.0115, lighter: 0.04, bag: 0.066}[id] || 0.05;
         o.quaternion.copy(w.camera.quaternion);
         o.rotateX(rotation[0]);
         o.rotateY(rotation[1]);
@@ -96,6 +96,8 @@ try {
   await shot('16-lighter-back', 'lighter', [0, Math.PI, 0]);
   await shot('17-lighter-bottom', 'lighter', [-1.35, 0.3, 0.1]);
   await shot('18-lighter-tilted', 'lighter', [0.2, 0, 0.78]);
+  await shot('19-bag-front', 'bag');
+  await shot('20-bag-tilted', 'bag', [0.35, 0.5, 0.15]);
 
   const manifest = await session.finalize({
     warning: 'Paused, isolated prop inspection fixtures, not gameplay proof.',

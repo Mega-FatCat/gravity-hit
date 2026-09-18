@@ -104,12 +104,13 @@ export class World {
    (async()=>{const model=await gl.loadAsync('./assets/clipper.glb');this.upgradeLighter(model.scene);})(),
    (async()=>{const model=await gl.loadAsync('./assets/bottle.glb');this.upgradeBottle(model.scene);})(),
    (async()=>{const model=await gl.loadAsync('./assets/pipe.glb');this.upgradePipe(model.scene);})(),
+   (async()=>{try{const[bH,pH,scH,bgH,pcH,cavH,contract]=await Promise.all([gl.loadAsync('./assets/props-hero/bottle_hero.glb'),gl.loadAsync('./assets/props-hero/pipe_hero.glb'),gl.loadAsync('./assets/props-hero/cap_spare.glb'),gl.loadAsync('./assets/props-hero/bag_hero.glb'),gl.loadAsync('./assets/props-hero/packed_charge.glb'),gl.loadAsync('./assets/props-hero/bottle_cavity.glb'),fetch('./assets/props-hero/prop_contract.json').then(r=>r.json()).catch(()=>null)]);this.heroModels={bottle:bH.scene,pipe:pH.scene,spareCap:scH.scene,bag:bgH.scene,packedCharge:pcH.scene,bottleCavity:cavH.scene};this.heroContract=contract;if(contract?.samples&&this.liquid?.setSamples)this.liquid.setSamples(contract.samples);}catch(e){console.warn('Hero props GLB load failed:',e.message);}})(),
    (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/rock_moss_set_01/rock_moss_set_01.gltf'),gl.loadAsync('./assets/creek_rocks_lod.glb')]);this.upgradeRocks(model.scene,lod.scene);})(),
    (async()=>{const env=await new RGBELoader(manager).loadAsync('./assets/forest.hdr');env.mapping=T.EquirectangularReflectionMapping;this.env=env;this.scene.environment=env;this.scene.background=null;this.scene.environmentIntensity=.62;this.scene.backgroundIntensity=.62;this.scene.backgroundRotation.y=1.7;this.scene.environmentRotation.y=1.7;this.scene.backgroundBlurriness=0;})(),
    (async()=>{const [map,normalMap]=await Promise.all([texture('rock_boulder_dry/diff.jpg',true,2.5),texture('rock_boulder_dry/nor_gl.jpg',false,2.5)]);Object.assign(this.rockMat,{map,normalMap});this.rockMat.normalScale.set(.75,.75);this.rockMat.needsUpdate=true;})(),
    (async()=>{const [map,normalMap]=await Promise.all([texture('bark_brown_02/diff.jpg',true,3),texture('bark_brown_02/nor_gl.jpg',false,3)]);Object.assign(this.barkMat,{map,normalMap});this.barkMat.needsUpdate=true;})(),
    (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/fern_02/fern_02.gltf'),gl.loadAsync('./assets/fern_02_lod.glb')]);plantFerns(this,model.scene,lod.scene);})(),
-   (async()=>{const [model,lod,broadleaf,broadleafLod,solidBroadleaf]=await Promise.all([gl.loadAsync('./assets/shrub_04/shrub_04.gltf'),gl.loadAsync('./assets/shrub_04_lod.glb'),gl.loadAsync('./assets/shrub_03/shrub_03.gltf'),gl.loadAsync('./assets/shrub_03_lod.glb'),this.treeLeafReady]);this.makeShrubs(model.scene,lod.scene,broadleaf.scene,broadleafLod.scene,solidBroadleaf.scene);})(),
+   (async()=>{const [model,lod,broadleaf,broadleafLod,solidBroadleaf,shrub02,shrub02Lod]=await Promise.all([gl.loadAsync('./assets/shrub_04/shrub_04.gltf'),gl.loadAsync('./assets/shrub_04_lod.glb'),gl.loadAsync('./assets/shrub_03/shrub_03.gltf'),gl.loadAsync('./assets/shrub_03_lod.glb'),this.treeLeafReady,gl.loadAsync('./assets/shrub_02/shrub_02.gltf'),gl.loadAsync('./assets/shrub_02_lod.glb')]);this.makeShrubs(model.scene,lod.scene,broadleaf.scene,broadleafLod.scene,solidBroadleaf.scene,shrub02.scene,shrub02Lod.scene);})(),
    (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/grass_clumps_lod.glb'),gl.loadAsync('./assets/grass_far_lod.glb')]);plantGrass(this,model.scene,lod.scene);})(),
    (async()=>{try{const [model,leafAsset]=await Promise.all([gl.loadAsync('./assets/pine.glb'),this.treeLeafReady,this.pineBarkReady,...this.foliageAlphaReady]);this.makePines(model.scene,leafAsset.scene);}catch(e){console.warn('Pine LOD unavailable',e.message);}})()
   ];const result=await Promise.allSettled(tasks);this.assetErrors=result.filter(r=>r.status==='rejected').map(r=>String(r.reason));if(this.assetErrors.length)console.error(this.assetErrors);upgradeHeroProps(this);this.renderer.compile(this.scene,this.camera);this._shadowState=null;this.renderer.shadowMap.needsUpdate=true;return this;
@@ -120,7 +121,7 @@ export class World {
  addWind(material,amp=.025){material.onBeforeCompile=shader=>{shader.uniforms.uTime={value:0};shader.uniforms.uWind={value:this.wind};shader.vertexShader='uniform float uTime; uniform float uWind;\n'+shader.vertexShader;shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`#include <begin_vertex>\n float sway = sin(uTime*1.3+position.x*1.8+position.z*.9)*${amp.toFixed(4)}*uWind; transformed.x += sway*max(0.,position.y); transformed.z += sway*.4*max(0.,position.y);`);this.windMats.push(shader);};material.customProgramCacheKey=()=>`wind${amp}`;}
   makeFerns(model){plantFerns(this,model);}
  makePines(model,leafModel=null){plantPines(this,model,false,leafModel);}
- makeShrubs(model,lodModel,broadleafModel=null,broadleafLod=null,solidBroadleafModel=null){plantShrubs(this,model,lodModel,broadleafModel,broadleafLod,solidBroadleafModel);}
+  makeShrubs(model,lodModel,broadleafModel=null,broadleafLod=null,solidBroadleafModel=null,shrub02Model=null,shrub02Lod=null){plantShrubs(this,model,lodModel,broadleafModel,broadleafLod,solidBroadleafModel,shrub02Model,shrub02Lod);}
   makeGroundCover(model){plantGrass(this,model);}
   upgradeRocks(model,lodModel){
    const sources=[];model.traverse(o=>{if(o.isMesh)sources.push(o);});
@@ -538,12 +539,15 @@ export class World {
    this.flameLight=new T.PointLight('#ffb35a',0,.65,2);lighter.add(this.flameLight);this.flameLight.position.set(0,.11,0);
    const bag=new T.Group();this.scene.add(bag);this.items.bag=bag;
    const weedBag=createWeedBag(this.bagBudMat);bag.add(weedBag.group);this.bagFilm=weedBag.film;this.bagNugs=weedBag.contents;this.bagGeos=weedBag.geometries;
-   this.trash=new T.Group();this.scene.add(this.trash);this.trash.position.set(.7,.0,.45);const sack=mesh(new T.SphereGeometry(.24,32,24),mat('#192321',.36),this.trash,V(0,.17,0));sack.scale.set(1,.9,.85);const top=mesh(new T.TorusGeometry(.12,.045,12,32),mat('#29322c',.4),this.trash,V(0,.32,0));top.rotation.x=Math.PI/2;for(let i=0;i<36;i++){const n=mesh(this.bagGeos[i%this.bagGeos.length],this.bagBudMat,this.trash,V(rand(-.095,.095),.30+rand(0,.06),rand(-.07,.07)));n.scale.setScalar(2.4);}this.trash.visible=false;
    const outlet=mesh(new T.CircleGeometry(.0025,16),mat('#161b12',.8,{side:T.DoubleSide}),bottle,V(.0326,.032,0));outlet.rotation.y=Math.PI*.43;this.outlet=outlet;
-   this.jet=mesh(new T.CylinderGeometry(.0014,.0021,1,8),new T.MeshPhysicalMaterial({color:'#d9f3ea',transparent:true,opacity:.55,roughness:.15,metalness:.25}),this.scene);this.jet.castShadow=false;
+    const jetMat=new T.MeshPhysicalMaterial({color:'#e7fff9',roughness:.035,metalness:0,transmission:.55,thickness:.01,ior:1.333,transparent:true,opacity:.94,depthWrite:false,side:T.DoubleSide,envMapIntensity:1.2,clearcoat:.8,clearcoatRoughness:.025});
+    jetMat.onBeforeCompile=shader=>{shader.uniforms.uTime={value:0};this.jetShader=shader;shader.vertexShader='uniform float uTime;\n'+shader.vertexShader;shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`#include <begin_vertex>\n float swirl = sin(position.y * 180.0 - uTime * 35.0) * 0.00028;\n transformed.x += swirl;\n transformed.z += cos(position.y * 180.0 - uTime * 35.0) * 0.00028;`);};
+    this.jet=mesh(new T.CylinderGeometry(.0014,.0021,1,8),jetMat,this.scene);this.jet.castShadow=false;this.jet.renderOrder=3;
+    const splashMat=new T.MeshBasicMaterial({color:'#d9fff6',transparent:true,opacity:0,depthWrite:false,side:T.DoubleSide});
+    this.splashRing=mesh(new T.RingGeometry(.003,.036,32),splashMat,this.scene);this.splashRing.rotation.x=-Math.PI/2;this.splashRing.renderOrder=3;this.splashRing.visible=false;
+    const dropGeo=new T.SphereGeometry(.0012,8,6);this.jetDrops=[];for(let i=0;i<6;i++){const d=mesh(dropGeo,jetMat,this.scene);d.castShadow=false;d.visible=false;this.jetDrops.push(d);}
    this.home={bottle:V(-.2272,.293,.7578),pipe:V(-.201,.323,.986),lighter:V(-.10,.31,.92),bag:V(.287,.32,1.084)};
    for(const [id,g]of Object.entries(this.items)){g.userData.item=id;g.position.copy(this.home[id]);g.traverse(o=>{o.userData.item=id;if(o.isMesh)this.interactive.push(o);});}this.items.bottle.rotation.set(-1.7768,.1651,.7989);this.items.bag.rotation.set(-1.453,-.0931,.9055);this.items.lighter.rotation.set(1.5708,0,0);
-   this.trash.traverse(o=>{o.userData.item='bag';if(o.isMesh)this.interactive.push(o);});
   }
   makeParticles(){
    // Retain the original 180 * 3 RNG draws so rain and every later
@@ -572,7 +576,7 @@ export class World {
    this.scene.updateMatrixWorld(true);this.camera.updateMatrixWorld(true);
    this.raycaster.setFromCamera(new T.Vector2(x/innerWidth*2-1,1-y/innerHeight*2),this.camera);
    const physical=[];const excluded=new Set([this.liquid.volume,this.bottleSmoke,this.hotTip,this.flame,this.flameCore,this.bowlBud]);
-   for(const root of [...Object.values(this.items),this.trash])root.traverse(o=>{if(o.isMesh&&!excluded.has(o)&&visibleSurface(o))physical.push(o);});
+   for(const root of Object.values(this.items))root.traverse(o=>{if(o.isMesh&&!excluded.has(o)&&visibleSurface(o))physical.push(o);});
    physical.push(this.stream);
    const blockers=[this.slab,this.groundMesh].filter(Boolean);
    const blockedAt=this.raycaster.intersectObjects(blockers,false)[0]?.distance??Infinity;
@@ -619,15 +623,40 @@ export class World {
 
    this.heroProps?.update(sim);
    const lighterAlone=sim.held==='lighter'&&!sim.supporting;
-   const flameOn=(input.fire&&(lighterAlone||['heat','hole','ignite'].includes(sim.mode)))||sim.mode==='auto';this.flame.visible=this.flameCore.visible=flameOn&&sim.angle<85&&sim.angle>-75;
+   const flameOn=input.fire&&(lighterAlone||['heat','hole','ignite'].includes(sim.mode));this.flame.visible=this.flameCore.visible=flameOn&&sim.angle<85&&sim.angle>-75;
    const flicker=.93+Math.sin(this.time*52)*.045+Math.sin(this.time*83)*.03;this.flameLight.intensity=flameOn?.018*flicker:0;this.emberLight.intensity=sim.embers*.008;if(flameOn&&!this.wasFlame)this.wheel.rotation.x+=1.4;this.wasFlame=flameOn;if(this.flameShader){this.flame.material.uniforms.time.value=this.time;this.flameCore.visible=false;this.flame.scale.set(1,flicker,1);}else this.flame.scale.y=(.007+.012*(sim.flameQuality||.3))*flicker;
-   this.items.bag.visible=!sim.upgraded;this.trash.visible=sim.upgraded;for(let i=0;i<this.bagNugs.length;i++)this.bagNugs[i].visible=i<sim.stock*3.5;
+   this.items.bag.visible=true;for(let i=0;i<this.bagNugs.length;i++)this.bagNugs[i].visible=i<sim.stock*3.5;
    this.jet.visible=sim.flow>0&&['free','inhale'].includes(sim.phase)&&sim.mode!=='fill';
+   if(this.jetShader)this.jetShader.uniforms.uTime.value=this.time;
    if(this.jet.visible){
-    const start=this.outlet.getWorldPosition(V()),direction=V(1,0,0).applyQuaternion(bottle.getWorldQuaternion(new T.Quaternion()));
-    const head=Math.max(0,this.liquid.level-start.y),speed=Math.sqrt(2*9.81*head)*.6,fall=Math.max(.035,start.y-this.ground(start.x,start.z)),duration=Math.sqrt(2*fall/9.81);
-    const points=[];for(let i=0;i<12;i++){const t=duration*i/11;points.push(start.clone().addScaledVector(direction,speed*t).add(V(0,-4.905*t*t,0)));}
-    this.jet.geometry.dispose();this.jet.geometry=new T.TubeGeometry(new T.CatmullRomCurve3(points),16,.0014,5,false);this.jet.position.set(0,0,0);this.jet.scale.setScalar(1);this.jet.quaternion.identity();
+    const start=this.outlet.getWorldPosition(V()),direction=V(1,0,0).applyQuaternion(bottle.getWorldQuaternion(new T.Quaternion())).normalize();
+    const head=Math.max(0,this.liquid.level-start.y),speed=Math.sqrt(2*9.81*head)*.75;
+    const fall=Math.max(.035,start.y-this.ground(start.x,start.z)),duration=Math.sqrt(2*fall/9.81);
+    const points=[];const steps=14;let impactPoint=null;
+    for(let i=0;i<=steps;i++){
+     const t=duration*(i/steps);const pt=start.clone().addScaledVector(direction,speed*t).add(V(0,-4.905*t*t,0));
+     const groundY=this.ground(pt.x,pt.z);
+     if(pt.y<=groundY&&i>0){pt.y=groundY+.001;points.push(pt);impactPoint=pt;break;}
+     points.push(pt);if(i===steps)impactPoint=pt;
+    }
+    if(points.length>=2){
+     this.jet.geometry.dispose();this.jet.geometry=new T.TubeGeometry(new T.CatmullRomCurve3(points),16,.003,8,false);this.jet.position.set(0,0,0);this.jet.scale.setScalar(1);this.jet.quaternion.identity();
+    }
+    if(impactPoint&&this.splashRing){
+     this.splashRing.visible=true;this.splashRing.position.copy(impactPoint).add(V(0,.001,0));
+     const splashPhase=(this.time*9.0)%1.0;this.splashRing.scale.setScalar(.6+splashPhase*1.2);this.splashRing.material.opacity=(1.0-splashPhase)*.68*Math.min(1.0,speed*2.0);
+    }
+    if(this.jetDrops&&points.length>=4){
+     const tailIdx=Math.floor(points.length*.7);
+     for(let i=0;i<this.jetDrops.length;i++){
+      const drop=this.jetDrops[i];drop.visible=true;const frac=(i+(this.time*8.0)%1.0)/this.jetDrops.length;
+      drop.position.copy(points[tailIdx]).lerp(points[points.length-1],frac);
+      drop.position.x+=Math.sin(this.time*30.0+i*2.1)*.0012;drop.position.z+=Math.cos(this.time*35.0+i*2.7)*.0012;
+     }
+    }
+   }else{
+    if(this.splashRing)this.splashRing.visible=false;
+    if(this.jetDrops)for(const d of this.jetDrops)d.visible=false;
    }
    for(const shader of this.windMats){shader.uniforms.uTime.value=this.time;shader.uniforms.uWind.value=settings.wind;}
    updateEnvironment(this,dt,sim,settings);
@@ -644,7 +673,7 @@ export class World {
    if(!sm.enabled||sm.autoUpdate)return;
    if(sm.needsUpdate)return;
    const sun=this.sun;
-   const items=[this.items?.lighter,this.wheel,this.items?.bottle,this.items?.pipe,this.items?.bag,this.trash].filter(Boolean);
+   const items=[this.items?.lighter,this.wheel,this.items?.bottle,this.items?.pipe,this.items?.bag].filter(Boolean);
    let dirty=!this._shadowState;
    if(!dirty){
     const s=this._shadowState;

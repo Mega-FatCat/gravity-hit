@@ -308,7 +308,7 @@ test('GH-08 Heating and Drainage: Torricelli cutoff, air draft stoking, cancel a
   assertInvariants(restored, 'heating/drainage invariants');
 });
 
-test('GH-08 Hit and Transition: prerequisites, inhale locking, Day 2 sleep upgrade', () => {
+test('GH-08 Hit and Transition: prerequisites, inhale locking, stock depletion and refill', () => {
   let s = ready({water: 0.15, smoke: 0.5, cap: true, held: 'bottle'});
   assert.equal(s.action('hit'), false, 'cannot hit with cap on');
 
@@ -329,17 +329,17 @@ test('GH-08 Hit and Transition: prerequisites, inhale locking, Day 2 sleep upgra
   assert.equal(s.smoke, 0);
   assert.equal(s.held, 'bottle');
 
-  // Complete all 10 charges to verify sleep transition
+  // Complete all 10 charges to verify stock depletion without sleep
   s.stock = 0;
   s.bud = 0;
   s.smoke = 0;
   advance(s, 0.1);
-  assert.equal(s.phase, 'sleep');
-
-  advance(s, 8);
   assert.equal(s.phase, 'free');
-  assert.equal(s.day, 2);
-  assert.equal(s.stock, 1000);
+  assert.equal(s.stock, 0);
+
+  // Refill restores stock to 10
+  assert.equal(s.refill(), true);
+  assert.equal(s.stock, 10);
   assertInvariants(s, 'hit and transition invariants');
 });
 

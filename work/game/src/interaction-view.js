@@ -37,9 +37,11 @@ export function prepareInteractionFrame(world,dt,sim,input,settings){
  world.camera.updateMatrixWorld(true);
  const hole=sim.phase==='hole'&&held('bottle');
  const bottle=world.items.bottle,pipe=world.items.pipe;
- let b=world.home.bottle,bq=q(-1.7768,.1651,.7989),bParent=null,bKey='rest';
+ const restBottleRotation=q(-1.7768,.1651,.7989),heldBottleWorldRotation=q(0,0,Math.PI/36);
+ let b=world.home.bottle,bq=restBottleRotation.clone(),bParent=null,bKey='rest';
  if(held('bottle')){
-  bParent=world.camera;b=v(-.08,-.15,-.64);bKey='held';
+  // Keep the held bottle world-upright with a 5-degree lean, independent of camera pitch/yaw.
+  bParent=world.camera;b=v(-.08,-.15,-.64);bq.copy(world.camera.quaternion).invert().multiply(heldBottleWorldRotation);bKey='held';
   if(hole){b=v(-.07,.025,-.45);bq=q(-2.05,1.05,.12);bKey='bottom';}
   else if(sim.phase==='inhale'){b=v(0,-.23,-.22);bq=q(.22,0,0);bKey='inhale';}
   // Bottle tilted on its side with mouth submerged into stream water, not
@@ -62,9 +64,9 @@ export function prepareInteractionFrame(world,dt,sim,input,settings){
  for(const part of pipe.children)if(part.material===world.capmesh?.material)part.visible=sim.prep>0;
  world.spareCap.visible=sim.prep===0&&sim.cap;
  if(world.meltRim)world.meltRim.visible=sim.outlet;
- const bagHeld=held('bag')&&!sim.upgraded;
+ const bagHeld=held('bag');
   pose(world,'bag',bagHeld?'held':'rest',bagHeld?world.camera:null,bagHeld?v(-.22,-.12,-.57):world.home.bag,bagHeld?q(-.12):q(-1.453,-.0931,.9055),dt);
- const aiming=held('lighter')&&['heat','hole','ignite','auto'].includes(sim.mode);
+ const aiming=held('lighter')&&['heat','hole','ignite'].includes(sim.mode);
   if(!aiming)pose(world,'lighter',held('lighter')?'held':'rest',held('lighter')?world.camera:null,held('lighter')?v(.17,-.13,-.49):world.home.lighter,held('lighter')?q(0,0,.12+T.MathUtils.degToRad(sim.angle)):q(1.5708,0,0),dt);
  world.scene.updateMatrixWorld(true);
  world.target.copy(world.targetPoint(sim));
@@ -72,7 +74,7 @@ export function prepareInteractionFrame(world,dt,sim,input,settings){
   const lighter=world.items.lighter;
   const plane=new T.Plane().setFromNormalAndCoplanarPoint(world.camera.getWorldDirection(v()),world.target);
   world.raycaster.setFromCamera(new T.Vector2(input.x/innerWidth*2-1,1-input.y/innerHeight*2),world.camera);
-  const contact=sim.mode==='auto'?world.target.clone():world.raycaster.ray.intersectPlane(plane,v())||world.target.clone();
+  const contact=world.raycaster.ray.intersectPlane(plane,v())||world.target.clone();
   // World-up buoyancy is also used by the visible flame. Its hot contact point
   // therefore shares the exact same anchor as the spatial interaction ray.
   const localQ=q(0,0,T.MathUtils.degToRad(sim.angle));
@@ -89,6 +91,5 @@ export function prepareInteractionFrame(world,dt,sim,input,settings){
  world.aimScreen=world.screen(world.target);
  const anchors={bottle:v(0,.226,0),pipe:v(0,.045,0),lighter:world.nozzle||v(0,.08,0),bag:v(0,.14,0)};
  for(const [id,object]of Object.entries(world.items))world.projected[id]=world.screen(object.localToWorld(anchors[id].clone()));
- if(sim.upgraded)world.projected.bag=world.screen(world.trash.localToWorld(v(0,.36,0)));
  world.projected.stream=world.screen(v(world.streamX(.75),-.06,.75));
 }

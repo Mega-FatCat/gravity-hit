@@ -1,5 +1,6 @@
 import * as T from 'three';
 import {normalizeLatheNormals,specularAntialiasing} from './edge-quality.js';
+import {createBagFilmMaterial} from './weed-bag.js';
 
 // ============================================================================
 // HERO-PROP RUNTIME SOURCE-OF-TRUTH (GH-43 ARCHITECTURAL AUDIT)
@@ -213,6 +214,88 @@ function rebuildPipe(world){
  const keep=new Set([world.hotTip,world.bowlBud,world.emberLight]);
  for(const part of pipe.children)if(part.material===capMaterial)keep.add(part);
  removeTree(world,pipe,keep);
+
+ if(world.heroModels?.pipe){
+  const glass=new T.MeshPhysicalMaterial({color:'#f4fbf7',roughness:.035,metalness:0,transmission:1,thickness:.0012,ior:1.474,transparent:false,opacity:1,depthWrite:false,side:T.DoubleSide,envMapIntensity:2.2,clearcoat:.85,clearcoatRoughness:.03});
+  borosilicateResponse(glass);
+  world.pipeMat=glass;
+  const pipeGlassOrig=world.heroModels.pipe.getObjectByName('PipeGlass');
+  const pipeGlass=pipeGlassOrig.clone();
+  pipeGlass.name='Slim borosilicate one-hitter';
+  pipeGlass.material=glass;
+  pipeGlass.renderOrder=5;
+  pipeGlass.castShadow=false;
+  pipeGlass.receiveShadow=true;
+  pipe.add(pipeGlass);
+  world.pipeGlass=pipeGlass;
+
+  const capDrilled=world.heroModels.pipe.getObjectByName('Cap_Drilled');
+  if(capDrilled){
+   world.capmesh.geometry.dispose();
+   world.capmesh.geometry=capDrilled.geometry.clone();
+   capMaterial.color.set('#1e5236');capMaterial.roughness=.36;capMaterial.metalness=.01;
+  }
+
+  const capCollar=world.heroModels.pipe.getObjectByName('CapCollar');
+  if(capCollar){
+   world.pipeGrommet=add(pipe,'Cap aperture seal',capCollar.geometry.clone(),new T.MeshStandardMaterial({color:'#262b27',roughness:.7}));
+  }
+
+  const pipeResidueOrig=world.heroModels.pipe.getObjectByName('PipeResidue');
+  const residueTexture=createPipeResidueTexture(world);
+  const residueMaterial=new T.MeshStandardMaterial({map:residueTexture,roughness:.38,metalness:.02,transparent:true,opacity:1,depthWrite:false,side:T.DoubleSide});
+  const residue=pipeResidueOrig?pipeResidueOrig.clone():add(pipe,'Inner amber residue',lathe([[.00456,.0465],[.00425,.0454],[.00395,.0432],[.00355,.0397],[.00311,.0357],[.00286,.0317],[.00267,.0287],[.00266,.0238],[.00264,.0168],[.00264,.0000],[.00264,-.0150],[.00264,-.0325],[.00266,-.0425],[.00290,-.0484]],64),residueMaterial);
+  residue.name='Inner amber residue';
+  residue.material=residueMaterial;
+  residue.renderOrder=4;
+  residue.userData.pickable=false;
+  if(pipeResidueOrig)pipe.add(residue);
+  world.pipeResidue=residue;
+
+  if(world.heroModels?.packedCharge){
+   const pc=world.heroModels.packedCharge.getObjectByName('PackedCharge');
+   if(pc){
+    if(pc.isMesh){
+     world.bowlBud.geometry.dispose();
+     world.bowlBud.geometry=pc.geometry.clone();
+     world.bowlBud.material=world.budMat;
+     if(pc.morphTargetDictionary){
+      world.bowlBud.morphTargetDictionary={...pc.morphTargetDictionary};
+      world.bowlBud.morphTargetInfluences=pc.morphTargetInfluences?[...pc.morphTargetInfluences]:[0,0];
+     }
+    }else{
+     world.bowlBud.geometry.dispose();
+     world.bowlBud.geometry=new T.BufferGeometry();
+     while(world.bowlBud.children.length)world.bowlBud.remove(world.bowlBud.children[0]);
+     const pcClone=pc.clone();
+     pcClone.traverse(child=>{
+      if(child.isMesh){
+       child.material=world.budMat;
+       child.castShadow=true;
+       child.receiveShadow=true;
+      }
+     });
+     world.bowlBud.add(pcClone);
+     world.heroProps.packedCharge=pcClone;
+    }
+    world.bowlBud.scale.set(1.0,1.0,1.0);
+   }
+  }
+
+  const scale=80.0/96.5;
+  world.hotTip.geometry.dispose();
+  world.hotTip.geometry=lathe([[.00315,-.004],[.00355,-.004],[.00355,.003],[.00315,.003]],48);
+  world.hotTip.position.set(0,-0.049*scale+0.005,0);
+  world.hotTip.userData.pickable=false;
+  world.bowlBud.position.set(0,0.040*scale,0);
+  world.bowlBud.userData.pickable=false;
+  world.emberLight.position.set(0,0.042*scale,0);
+
+  mark(world,pipe,'pipe');
+  world.heroProps.pipe=world.pipeGlass;
+  return;
+ }
+
  // Slim straight one-hitter/downstem matching the supplied reference: the
  // narrow stem passes through the cap, the shallow flared bowl stays above it,
  // and the opposite end has only a small fire-polished mouthpiece lip. Keep
@@ -388,6 +471,7 @@ function createLabelNormalTexture(){
 }
 
 function bottleLabel(){return canvasTexture(2048,512,(c,w,h)=>{
+ c.save();c.translate(w,h);c.scale(-1,-1);
  c.fillStyle='#e4e9dc';c.fillRect(0,0,w,h);
  // Top and bottom dark green brand border bars
  c.fillStyle='#1c442c';c.fillRect(0,0,w,12);c.fillRect(0,h-12,w,12);
@@ -447,11 +531,136 @@ function bottleLabel(){return canvasTexture(2048,512,(c,w,h)=>{
  c.fillStyle='rgba(215,225,205,0.45)';c.fillRect(0,0,24,h);c.fillRect(w-24,0,24,h);
  c.strokeStyle='rgba(130,150,130,0.6)';c.lineWidth=1.5;
  c.beginPath();c.moveTo(24,0);c.lineTo(24,h);c.moveTo(w-24,0);c.lineTo(w-24,h);c.stroke();
+ c.restore();
 });}
 
 function rebuildBottle(world){
  const bottle=world.items.bottle;
  removeTree(world,bottle,new Set([world.liquid.volume,world.bottleSmoke,world.spareCap,world.outlet]));
+
+ if(world.heroModels?.bottle){
+  const pet=new T.MeshPhysicalMaterial({
+   color:'#f8fdfb',
+   roughness:.08,
+   metalness:0,
+   transmission:.94,
+   thickness:.00035,
+   ior:1.57,
+   transparent:true,
+   opacity:.92,
+   depthWrite:false,
+   side:T.DoubleSide,
+   envMapIntensity:1.15,
+   clearcoat:1.0,
+   clearcoatRoughness:.04,
+   normalMap:createPetNormalTexture(),
+   normalScale:new T.Vector2(.38,.38)
+  });
+  thinShellResponse(pet,.05,.96);
+  world.petMat=pet;
+
+  const intactOrig=world.heroModels.bottle.getObjectByName('BottleShell_Intact');
+  const openOrig=world.heroModels.bottle.getObjectByName('BottleShell_Open');
+  const labelOrig=world.heroModels.bottle.getObjectByName('BottleLabel');
+  const threadOrig=world.heroModels.bottle.getObjectByName('NeckThread');
+  const rimOrig=world.heroModels.bottle.getObjectByName('OutletRim');
+
+  const intact=intactOrig?intactOrig.clone():null;
+  const open=openOrig?openOrig.clone():null;
+  const label=labelOrig?labelOrig.clone():null;
+  const thread=threadOrig?threadOrig.clone():null;
+  const rim=rimOrig?rimOrig.clone():null;
+
+  if(intact){
+   intact.name='BottleShell_Intact';
+   intact.material=pet;
+   intact.renderOrder=6;
+   intact.castShadow=false;
+   intact.receiveShadow=true;
+   bottle.add(intact);
+   world.bottleShellIntact=intact;
+  }
+  if(open){
+   open.name='BottleShell_Open';
+   open.material=pet;
+   open.renderOrder=6;
+   open.castShadow=false;
+   open.receiveShadow=true;
+   bottle.add(open);
+   world.bottleShellOpen=open;
+  }
+
+  const isOutlet=!!(world.sim?.outlet);
+  if(intact)intact.visible=!isOutlet;
+  if(open)open.visible=isOutlet;
+
+  if(label){
+   label.name='BottleLabel';
+   label.material=new T.MeshPhysicalMaterial({
+    map:bottleLabel(),
+    normalMap:createLabelNormalTexture(),
+    roughness:.25,
+    metalness:0,
+    clearcoat:.70,
+    clearcoatRoughness:.08,
+    side:T.FrontSide
+   });
+   label.rotation.y=Math.PI*0.5;
+   label.renderOrder=3;
+   label.castShadow=false;
+   label.receiveShadow=true;
+   bottle.add(label);
+   world.heroProps.bottleLabel=label;
+  }
+
+  if(world.heroModels?.bottleCavity){
+   const cav=world.heroModels.bottleCavity.getObjectByName('BottleCavity');
+   if(cav&&world.liquid?.setCavityGeometry)world.liquid.setCavityGeometry(cav.geometry);
+  }
+  if(world.heroContract?.samples&&world.liquid?.setSamples){
+    world.liquid.setSamples(world.heroContract.samples);
+   }
+
+  if(thread){
+   thread.name='NeckThread';
+   thread.material=pet;
+   thread.renderOrder=6;
+   thread.castShadow=false;
+   thread.receiveShadow=true;
+   bottle.add(thread);
+  }
+
+  if(rim){
+   rim.name='OutletRim';
+   rim.material=new T.MeshPhysicalMaterial({color:'#3d2b18',roughness:.40,transmission:.12,opacity:.82,transparent:true,depthWrite:false,side:T.DoubleSide,clearcoat:.45});
+   rim.renderOrder=7;
+   rim.visible=isOutlet;
+   rim.castShadow=false;
+   rim.receiveShadow=true;
+   bottle.add(rim);
+   world.meltRim=rim;
+  }
+
+  if(world.heroModels?.spareCap){
+   const sc=world.heroModels.spareCap.getObjectByName('Cap_Intact');
+   if(sc){
+    world.spareCap.geometry.dispose();
+    world.spareCap.geometry=sc.geometry.clone();
+    world.spareCap.material=new T.MeshPhysicalMaterial({color:'#1c4e33',roughness:.34,metalness:.01,clearcoat:.35,clearcoatRoughness:.18});
+    world.spareCap.position.set(0,.226,0);
+    world.spareCap.renderOrder=4;
+   }
+  }
+
+  world.outlet.position.set(.0326,.032,0);
+  world.outlet.visible=false;
+
+  mark(world,bottle,'bottle');
+  world.liquid.volume.userData.pickable=false;
+  world.bottleSmoke.userData.pickable=false;
+  world.heroProps.bottle=open||intact;
+  return;
+ }
 
  // Authentic disposable 500 mL thin PET spring water bottle profile:
  // Prominent molded corrugation ribs (hoop reinforcement), recessed label waist,
@@ -860,17 +1069,115 @@ function correctLighter(world){
  world.heroProps.lighter=model;
 }
 
-export function upgradeHeroProps(world){
- world.heroProps={};rebuildPipe(world);rebuildBottle(world);correctLighter(world);
- world.bottleSmoke.material.uniforms.uWaterPlane.value=world.liquid.localWaterPlane;
- world.heroAnchors={pipeTip:V(0,-.049,0),bowl:V(0,.045,0),bottleMouth:V(0,.226,0),outlet:V(.0326,.032,0),nozzle:world.nozzle.clone()};
- world.heroProps.update=sim=>{
-  world.pipeGrommet.visible=sim.prep>0;
-  world.pipeResidue.visible=sim.residue>0.003;
-  if(world.pipeResidue.visible&&world.pipeResidueCanvas){
-   updatePipeResidueTexture(world.pipeResidueCanvas,world.pipeResidueCtx,world.pipeResidueTexture,sim.residue);
+function upgradeHeroBag(world){
+ if(!world.heroModels?.bag)return;
+ const bag=world.items.bag;
+ const bagFilm=world.heroModels.bag.getObjectByName('BagFilm');
+ const zip1=world.heroModels.bag.getObjectByName('ZipRail_1');
+ const zip2=world.heroModels.bag.getObjectByName('ZipRail_-1');
+ if(!bagFilm)return;
+
+ const weedBagGroup=bag.getObjectByName('weed-bag');
+ if(!weedBagGroup)return;
+
+ for(const child of [...weedBagGroup.children]){
+  if(child.name==='bag-film'||child.name==='bag-seal'){
+   weedBagGroup.remove(child);
+   if(child.geometry)child.geometry.dispose();
   }
-  world.pipeMat.color.setRGB(1-sim.residue*.04,1-sim.residue*.06,1-sim.residue*.09);
-  world.pipeMat.roughness=.05+sim.residue*.025;
+ }
+
+ const filmMat=createBagFilmMaterial();
+ const newFilm=bagFilm.clone();
+ newFilm.name='bag-film';
+ newFilm.material=filmMat;
+ newFilm.renderOrder=4;
+ newFilm.castShadow=false;
+ newFilm.receiveShadow=false;
+ weedBagGroup.add(newFilm);
+ world.bagFilm=newFilm;
+
+ world.zipRails=[];
+ for(const z of [zip1,zip2]){
+  if(z){
+   const r=z.clone();
+   r.material=filmMat;
+   r.renderOrder=4;
+   weedBagGroup.add(r);
+   world.zipRails.push(r);
+  }
+ }
+ mark(world,bag,'bag');
+}
+
+export function upgradeHeroProps(world){
+ world.heroProps={};
+ rebuildPipe(world);
+ rebuildBottle(world);
+ correctLighter(world);
+ upgradeHeroBag(world);
+
+ world.bottleSmoke.material.uniforms.uWaterPlane.value=world.liquid.localWaterPlane;
+ const scale = world.heroModels?.pipe ? (80.0 / 96.5) : 1.0;
+ world.heroAnchors={
+  pipeTip:V(0,-.049*scale,0),
+  bowl:V(0,.045*scale,0),
+  budSeat:V(0,.040*scale,0),
+  bottleMouth:V(0,.226,0),
+  outlet:V(.0326,.032,0),
+  nozzle:world.nozzle?world.nozzle.clone():V(0,0,0)
+ };
+ world.heroProps.update=sim=>{
+  if(world.pipeGrommet)world.pipeGrommet.visible=sim.prep>0;
+  if(world.pipeResidue){
+   world.pipeResidue.visible=sim.residue>0.003;
+   if(world.pipeResidue.visible&&world.pipeResidueCanvas){
+    updatePipeResidueTexture(world.pipeResidueCanvas,world.pipeResidueCtx,world.pipeResidueTexture,sim.residue);
+   }
+  }
+  if(world.pipeMat){
+   world.pipeMat.color.setRGB(1-sim.residue*.04,1-sim.residue*.06,1-sim.residue*.09);
+   world.pipeMat.roughness=.035+sim.residue*.025;
+  }
+  if(world.bottleShellIntact&&world.bottleShellOpen){
+   world.bottleShellIntact.visible=!sim.outlet;
+   world.bottleShellOpen.visible=!!sim.outlet;
+  }
+  if(world.meltRim){
+   world.meltRim.visible=!!sim.outlet;
+  }
+  if(world.bagFilm?.morphTargetInfluences&&world.bagFilm?.morphTargetDictionary){
+   const d=world.bagFilm.morphTargetDictionary;
+   if('Open' in d){
+    const openVal=(sim.mode==='pack')?1.0:0.0;
+    world.bagFilm.morphTargetInfluences[d['Open']]=openVal;
+    if(world.zipRails){
+     for(const r of world.zipRails){
+      if(r.morphTargetDictionary&&'Open' in r.morphTargetDictionary){
+       r.morphTargetInfluences[r.morphTargetDictionary['Open']]=openVal;
+      }
+     }
+    }
+   }
+   if('Empty' in d){
+    world.bagFilm.morphTargetInfluences[d['Empty']]=sim.stock<=0?1.0:0.0;
+   }
+  }
+  if(world.heroProps?.packedCharge){
+   world.heroProps.packedCharge.traverse(child=>{
+    if(child.morphTargetInfluences&&child.morphTargetDictionary){
+     const d=child.morphTargetDictionary;
+     if('Spent' in d){
+      child.morphTargetInfluences[d['Spent']]=Math.max(0,1.0-sim.bud);
+     }
+    }
+   });
+  }
+  if(world.bowlBud?.morphTargetInfluences&&world.bowlBud?.morphTargetDictionary){
+   const d=world.bowlBud.morphTargetDictionary;
+   if('Spent' in d){
+    world.bowlBud.morphTargetInfluences[d['Spent']]=Math.max(0,1.0-sim.bud);
+   }
+  }
  };
 }

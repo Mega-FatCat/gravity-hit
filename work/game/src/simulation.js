@@ -1,8 +1,14 @@
 export const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
 export class Simulation {
- constructor(saved){Object.assign(this,{version:3,phase:'collect',mode:'idle',held:null,supporting:null,picked:[],prep:0,heat:0,progress:0,cap:true,outlet:false,water:0,bud:0,embers:0,smoke:0,stock:10,lost:0,hits:0,day:1,residue:0,lastQuality:0,cough:0,seal:false,tutorial:true,firstHit:true,angle:0,time:0,transition:0,notice:'',noticeTimer:0,busy:0},saved||{});this.version=3;this.mode='idle';this.busy=0;this.flow=0;this.flameQuality=0;if(this.phase==='inhale'){this.water=this.bud=this.embers=this.smoke=0;this.cap=false;this.firstHit=false;this.tutorial=false;this.seal=false;this.transition=0;this.phase=this.stock?'free':'sleep';}if(!['collect','heat','press','unscrew','hole','free','sleep'].includes(this.phase))this.phase='collect';if(this.held&&!['bottle','pipe','lighter','bag'].includes(this.held))this.held=null;this.assert();}
+ constructor(saved){Object.assign(this,{version:3,phase:'collect',mode:'idle',held:null,supporting:null,picked:[],prep:0,heat:0,progress:0,cap:true,outlet:false,water:0,bud:0,embers:0,smoke:0,stock:10,lost:0,hits:0,day:1,residue:0,lastQuality:0,cough:0,seal:false,tutorial:true,firstHit:true,angle:0,time:0,transition:0,notice:'',noticeTimer:0,busy:0},saved||{});this.version=3;this.mode='idle';this.busy=0;this.flow=0;this.flameQuality=0;if(this.phase==='inhale'||this.phase==='sleep'){this.water=this.bud=this.embers=this.smoke=0;this.cap=false;this.firstHit=false;this.tutorial=false;this.seal=false;this.transition=0;this.phase='free';}if(!['collect','heat','press','unscrew','hole','free'].includes(this.phase))this.phase='collect';if(this.held&&!['bottle','pipe','lighter','bag'].includes(this.held))this.held=null;this.assert();}
  say(message){this.notice=message;this.noticeTimer=5;return false;}
- get upgraded(){return this.day>1;}
+ get upgraded(){return false;}
+ refill(amount=10){
+  if(!['free','inhale'].includes(this.phase))return false;
+  this.stock=amount;
+  this.say('Herb supply refilled.');
+  return true;
+ }
  get ready(){return this.phase==='free';}
  get burning(){return this.embers>.08&&this.bud>0;}
  get smokeDensity(){return clamp(this.smoke/Math.max(.08,1-this.water));}
@@ -19,7 +25,8 @@ export class Simulation {
  }
  action(target){
   const id=target==='ignite'?'lighter':target==='fill'?'stream':target;
-  if(this.busy>0||['inhale','sleep'].includes(this.phase))return false;
+  if(id==='refill')return this.refill();
+  if(this.busy>0||this.phase==='inhale')return false;
   // Repeated clicks during a turn/press cannot restart it or exchange its tools.
   if(['press','unscrew','screw','uncap'].includes(this.mode))return false;
   if(this.phase==='collect'||this.phase==='heat'){
@@ -56,25 +63,23 @@ export class Simulation {
     if(!this.picked.includes('pipe'))this.picked.push('pipe');
     if(!this.picked.includes('bottle'))this.picked.push('bottle');
     this.say('Hold LMB or D to screw the cap onto the bottle.');
-    if(this.upgraded)this.setCap(true);
     return true;
    }
    const selectTarget=id==='pack'?'bag':id;
    this.select(selectTarget,['pipe','bag']);
    if(this.cap)return this.say('Unscrew the cap before loading the pipe.');
    if(this.bud>0)return this.say('The pipe is already loaded.');
-   if(this.stock<=0)return this.say('The bag is empty.');
+   if(this.stock<=0)return this.say('The bag is empty. Click Refill to replenish.');
    // Clicking the pipe alone does not auto-start weed loading; clicking the
    // bag (or pipe while already holding bag) begins the pack interaction.
-   if(id==='pipe'&&!this.isHeld('bag')&&!this.upgraded)return this.say('Open the bag to load the pipe.');
-   this.mode='pack';if(this.upgraded)this.pack(true);return true;
+   if(id==='pipe'&&!this.isHeld('bag'))return this.say('Open the bag to load the pipe.');
+   this.mode='pack';return true;
   }
   if(id==='stream'){
    if(this.prep<2||!this.outlet)return this.say('Finish preparing the bottle before collecting water.');
    if(!this.isHeld('bottle'))return this.say('Pick up the bottle first, then target the stream.');
    if(this.cap)return this.say('Unscrew the cap before refilling.');
    this.mode='fill';this.progress=0;
-   if(this.upgraded){this.water=1;this.smoke=0;this.mode='idle';this.seal=true;this.say('Filled and sealed. Fit the cap when you are ready.');}
    return true;
   }
   if(id==='bottle'){
@@ -86,14 +91,12 @@ export class Simulation {
      if(!this.picked.includes('pipe'))this.picked.push('pipe');
      if(!this.picked.includes('bottle'))this.picked.push('bottle');
      this.say('Hold LMB or D to screw the cap onto the bottle.');
-     if(this.upgraded)this.setCap(true);
     }
     return true;
    }
    this.mode=this.cap?'uncap':'screw';this.progress=this.cap?1:0;
    if(!this.cap&&this.prep>0){this.supporting='pipe';if(!this.picked.includes('pipe'))this.picked.push('pipe');}
    this.say(this.cap?'Hold LMB or A to unscrew the cap.':'Hold LMB or D to screw the cap on.');
-   if(this.upgraded)this.setCap(!this.cap);
    return true;
   }
   if(id==='lighter'){
@@ -103,7 +106,6 @@ export class Simulation {
    if(this.water<=.072)return this.say('No water remains above the outlet. Refill at the stream.');
    this.mode='ignite';
    if(!this.bud)this.say('The pipe is empty. Water can drain, but no smoke will form.');
-   if(this.upgraded&&this.bud&&this.isHeld('bottle')){this.seal=false;this.mode='auto';}
    return true;
   }
   if(id==='hit'){
@@ -113,7 +115,7 @@ export class Simulation {
    if(this.smoke<.015)return this.say('There is no trapped smoke to take.');
    if(this.mode==='fill')return this.say('Finish collecting water before taking the hit.');
    this.lastQuality=clamp(this.smoke*1.7)*(this.water>=.1&&this.water<=.22?1:.72);
-   this.cough=(this.water<.1?1:.28)*(this.upgraded?.35:1);
+   this.cough=this.water<.1?1:.28;
    this.phase='inhale';this.transition=0;this.mode='idle';this.hits++;this.residue=clamp(this.residue+.015);this.busy=.3;return true;
   }
   return false;
@@ -134,7 +136,7 @@ export class Simulation {
   this.mode='idle';return true;
  }
  cancel(){
-  if(['inhale','sleep'].includes(this.phase))return false;
+  if(this.phase==='inhale')return false;
   this.mode='idle';this.held=this.supporting=null;this.flow=this.flameQuality=0;return true;
  }
  step(dt,input={}){
@@ -166,7 +168,7 @@ export class Simulation {
     this.water=clamp(this.water+(input.fire?dt*.3*aim:0));
     if(this.water>=.995){this.mode='idle';this.say('Full. Hold SPACE to seal the outlet.');}
    }
-   if(this.held==='bottle'&&this.mode==='idle'&&!this.upgraded){
+   if(this.held==='bottle'&&this.mode==='idle'){
     if(tilt<0&&this.cap){this.mode='uncap';this.progress=1;}
     else if(tilt>0&&!this.cap){this.mode='screw';this.progress=0;if(this.prep>0){this.supporting='pipe';if(!this.picked.includes('pipe'))this.picked.push('pipe');}}
    }
@@ -181,8 +183,7 @@ export class Simulation {
    if(this.outlet&&!sealed&&this.water>.072&&this.mode!=='fill'){
     this.flow=Math.min(this.water-.072,dt*.15*Math.sqrt(this.water-.072));this.water-=this.flow;
    }
-   const automatic=this.mode==='auto'&&this.held==='lighter'&&this.isHeld('bottle')&&this.cap&&this.bud>0;
-   const lighting=automatic?1:this.mode==='ignite'&&this.cap?this.flameQuality:0;
+   const lighting=this.mode==='ignite'&&this.cap?this.flameQuality:0;
    const draft=dt>0?this.flow/dt:0;
    const flameRate=lighting>0&&this.bud>0?lighting*.9*(1.1-this.embers*.3):0;
    const stokeRate=(draft>0&&this.embers>.08&&this.bud>0)?draft*2.5*this.embers*(1-this.embers*.2):0;
@@ -205,14 +206,10 @@ export class Simulation {
    if(lighting>0&&this.bud>0)this.bud=Math.max(0,this.bud-lighting*dt*.002);
    if(!this.cap){this.smoke=Math.max(0,this.smoke-dt*.035);this.embers=Math.max(0,this.embers-dt*.3);}
    else this.smoke=Math.max(0,this.smoke-dt*.0015);
-   if(automatic&&this.water<=.16){this.seal=true;this.setCap(false);this.action('hit');}
    if(input.hit)this.action('hit');
-   if(this.phase==='free'&&!this.stock&&this.bud<.01&&this.smoke<.015){this.phase='sleep';this.transition=0;this.mode='idle';this.held=this.supporting=null;this.seal=false;}
   }else if(this.phase==='inhale'){
    this.transition+=dt;this.flow=Math.min(this.water,dt*.4);this.water-=this.flow;this.smoke=Math.max(0,this.smoke-dt*.65);
-   if(this.transition>4){this.bud=0;this.embers=0;this.water=0;this.smoke=0;this.cap=false;this.seal=false;this.phase=this.stock<=0?'sleep':'free';if(this.phase==='sleep')this.held=this.supporting=null;this.transition=0;if(this.firstHit){this.firstHit=false;this.tutorial=false;this.say('You have the rhythm. Guide hidden — press T whenever you want it back.');}}
-  }else if(this.phase==='sleep'){
-   this.transition+=dt;if(this.transition>7){this.day++;this.stock=1000;this.cap=false;this.water=0;this.bud=0;this.smoke=0;this.embers=0;this.seal=false;this.held=this.supporting=null;this.phase='free';this.mode='idle';this.transition=0;this.say('A new morning. Actions are automatic. Your supply has grown.');}
+   if(this.transition>4){this.bud=0;this.embers=0;this.water=0;this.smoke=0;this.cap=false;this.seal=false;this.phase='free';this.transition=0;if(this.firstHit){this.firstHit=false;this.tutorial=false;this.say('You have the rhythm. Guide hidden — press T whenever you want it back.');}}
   }
   this.assert();
  }

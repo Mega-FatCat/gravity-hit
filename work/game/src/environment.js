@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {TreeCanopyDensity} from './tree-canopy-density.js';
 import {createStreamWater} from './stream-water.js';
 import {buildForestClutter} from './clutter.js';
 import {buildStreambed,applyStreambedTextures} from './streambed.js';
@@ -223,17 +224,26 @@ export function forestHeight(x,z){
 }
 function addMesh(world,geometry,material,name){const m=new T.Mesh(geometry,material);m.name=name;m.receiveShadow=true;world.scene.add(m);return m;}
 function placeAllowed(x,z,height=.3,margin=.16,slabMargin=0){
- // Strict water exclusion: roots and stems can NEVER grow inside water (W = -0.065)
- if(forestHeight(x,z)<W+0.048)return false;
+ const isBush=height>.25;
+ // Ensure bush roots are firmly on dry bank shoulders (W = -0.065, +0.16m is well above water)
+ const minWaterY=W+(isBush?.16:.048);
+ if(forestHeight(x,z)<minWaterY)return false;
  const effCreekX=creekX(z)+creekBankMeander(z);
- if(Math.abs(x-effCreekX)<creekWidth(z)*.5+margin)return false;
- // Only the central ritual slab is protected here. Do not use a circular
- // clearing radius: that would incorrectly remove plants rooted in nearby soil.
+ // Bank margin must exceed lateral branch spread so no branches emerge from water
+ const bushSpread=isBush?Math.max(.60,height*.55):.15;
+ const bankMargin=Math.max(bushSpread,margin);
+ if(Math.abs(x-effCreekX)<creekWidth(z)*.5+bankMargin)return false;
  if(ritualSlabCoverage(x,z,slabMargin))return false;
- const playerRadius=height<=.22?.45:.62+Math.min(height,.9)*.30;
+ const playerRadius=height<=.25?.45:(height<=.65?1.40:(height<=1.15?2.60:3.60));
  if(Math.hypot(x,z-2.65)<playerRadius)return false;
- // View corridor between player and stone (and behind bottle) for taller growth
  if(height>.22&&Math.abs(x)<.48+height*.18&&z>-.20&&z<2.45)return false;
+ // Clear downstream creek sightline looking left from camera so
+ // bushes do not sprout in or block the downstream vista, framing from the sides
+ if(isBush&&z>-12.0&&z<0.5){
+  const hw=creekWidth(z)*0.5;
+  const viewClearance=height>.65?1.85:(height>.40?1.25:.85);
+  if(Math.abs(x-effCreekX)<hw+viewClearance)return false;
+ }
  return true;
 }
 function instances(world,geometry,material,placements,name,shadow=true){
@@ -529,7 +539,7 @@ roughnessFactor = mix(roughnessFactor, .82, vCreekSurface.z * .45);`));
  world.sun.shadow.camera.left=-28;world.sun.shadow.camera.right=28;world.sun.shadow.camera.top=28;world.sun.shadow.camera.bottom=-28;world.sun.shadow.camera.far=90;world.sun.shadow.camera.updateProjectionMatrix();world.sun.shadow.normalBias=.008;world.sun.shadow.bias=-.00005;
 }
 
-function plantModel(world,model,{name,seed,count,radius=17,minRadius=0,height=[.2,.5],wind=.025,near=.9,shadow=true,cluster=1.8,maxTriangles=Infinity,belt=false,midground=false,variantPattern=null,nearPatches=false,lodModel=null,lodDistance=6,layered=false,layerScale=.76,layerYScale=.90,layerMaxDistance=8,visualFamilies=null,primaryWeight=1,scatterChance=null}){
+function plantModel(world,model,{name,seed,count,radius=17,minRadius=0,height=[.2,.5],wind=.025,near=.9,shadow=true,cluster=1.8,maxTriangles=Infinity,belt=false,midground=false,variantPattern=null,nearPatches=false,lodModel=null,lodDistance=6,layered=false,layerScale=.76,layerYScale=.90,layerMaxDistance=8,visualFamilies=null,primaryWeight=1,scatterChance=null,streamBand=null}){
  const randomPlant=random(seed);
  const acceptVariants=source=>plantVariants(source).filter(v=>(!variantPattern||variantPattern.test(v.name))&&v.parts.reduce((n,p)=>n+(p.geometry.index?.count??p.geometry.attributes.position.count)/3,0)<=maxTriangles);
  const familyDefs=[{model,lodModel,weight:primaryWeight,lodDistance},...(visualFamilies??[])];
@@ -553,201 +563,271 @@ function plantModel(world,model,{name,seed,count,radius=17,minRadius=0,height=[.
  const chooseFamily=roll=>{let cursor=roll*totalFamilyWeight;for(let fi=0;fi<families.length;fi++){cursor-=families[fi].weight;if(cursor<=0)return fi;}return families.length-1;};
  const centers=[];
  const sparseAnchors=[
-  // Sector A: North-East / right of slab
-  [2.2,0.2],[3.2,-0.8],[2.6,1.2],[3.8,0.5],[3.4,-2.0],[2.0,-1.2],[4.2,-1.0],
-  // Sector B: East / South-East
-  [2.8,2.8],[4.0,3.5],[3.6,4.6],[4.8,2.2],[2.5,3.8],[4.4,4.2],[3.2,5.0],
-  // Sector C: South / Rear (behind player)
-  [1.4,5.2],[2.6,6.4],[0.5,6.0],[-1.2,5.5],[1.8,7.8],[-1.8,7.2],[0.2,7.0],[2.2,8.5],
-  // Sector D: Far stream bank (west / southwest across creek)
-  [-3.8,0.5],[-4.5,-1.5],[-4.2,2.4],[-4.8,4.0],[-3.6,4.8],[-4.0,-2.6],[-5.2,1.8]
- ];
- for(let i=0;i<320;i++){
-  if(midground&&i<sparseAnchors.length){
-   const anchor=sparseAnchors[i];
-   const ja=hash(seed%997+i*43,i*71+17)*TAU;
-   const jr=.16+hash(seed%613+i*59,i*31+29)*.30;
-   centers.push([anchor[0]+Math.cos(ja)*jr,anchor[1]+Math.sin(ja)*jr]);
-   continue;
-  }
-  const a=randomPlant()*TAU;
-  const r=nearPatches?1.5+randomPlant()*5.5:belt?6+Math.sqrt(randomPlant())*(radius-6):midground?(minRadius||2.2)+(randomPlant()*.7+Math.sqrt(randomPlant())*.3)*(radius-(minRadius||2.2)):i<120?1.3+Math.sqrt(randomPlant())*Math.min(radius-2,10):6+Math.sqrt(randomPlant())*(radius-6);
-  const cz=midground?(randomPlant()<.45?.8:2.4):i%2===0?.8:2.2;
-  centers.push([Math.cos(a)*r,Math.sin(a)*r+cz]);
- }
- for(let i=0;i<count;i++){
-  // Clustered around thickets/anchors vs distributed across radius
-  let x,z;
-  if(randomPlant()<(scatterChance??(midground?0.40:0.35))){
-   const a=randomPlant()*TAU;
-   const r=nearPatches?1.5+randomPlant()*5.5:belt?6+Math.sqrt(randomPlant())*(radius-6):midground?(minRadius||2.2)+(randomPlant()*.7+Math.sqrt(randomPlant())*.3)*(radius-(minRadius||2.2)):1.3+Math.sqrt(randomPlant())*(radius-1.3);
-   const cz=randomPlant()<0.5?.8:2.2;
-   x=Math.cos(a)*r;z=Math.sin(a)*r+cz;
-  }else{
-   const c=centers[i%centers.length],a=randomPlant()*TAU,r=Math.sqrt(randomPlant())*cluster;
-   x=c[0]+Math.cos(a)*r;z=c[1]+Math.sin(a)*r;
-  }
-  const h=lerp(height[0],height[1],randomPlant());
-  // Species/model choice is a pure position hash: no extra RNG calls, no root
-  // movement, and no change to clustering.  This lets one existing shrub root
-  // render a different scan family instead of cloning the lance-leaf silhouette
-  // hundreds of times across the same forest.
-  const familyRoll=hash(Math.round(x*31.7)+seed%991,Math.round(z*31.7)+seed%659);
-  const familyIndex=chooseFamily(familyRoll),family=families[familyIndex];
-  const index=i%family.variants.length,variant=family.variants[index],s=h/Math.max(.04,variant.height);
-  const isBush=/shrub|sapling|heath|understory|fir/i.test(name);
-  // Keep roots on the damp bank shoulder, never in the water trough. A
-  // slightly wider exclusion for woody bushes removes the few apparent
-  // floating shrubs while leaving plants that grow out of the bank intact.
-  const rootY=forestHeight(x,z);
-  const bankRootClearance=isBush?.105:.060;
-  // Keep a shrub's low stem/base on the damp shoulder as well as its root
-  // point. This removes the few visually floating bushes whose foliage base
-  // overhung the water even though their instance center was outside it.
-  const lowBaseReach=isBush?Math.min(.12,(variant.baseRadius??0)*s*family.widthScale):Math.min(.08,(variant.baseRadius??0)*s*.55*family.widthScale);
-  const bankMargin=(isBush?.115:.055)+lowBaseReach;
-  // A few broad ground-cover variants have a low leaf fan wider than their
-  // root point. Keep only that small base overlap off the slab; plants rooted
-  // just behind the stone must remain in the scene.
-  const slabMargin=Math.min(.08,.008+lowBaseReach);
-  // These are the three screenshot-marked bush roots on the ritual slab.
-  // This is intentionally limited to the named midground group so the dense
-  // plants rooted immediately behind the stone remain in the scene.
-  if((name==='Midground screening bushes'&&ritualSlabMarkedBush(x,z))||rootY<W+bankRootClearance||!placeAllowed(x,z,h,bankMargin,slabMargin)||Math.hypot(x,z-2.65)<near)continue;
-  const eps=0.25;
-  const slopeX=(forestHeight(x+eps,z)-forestHeight(x-eps,z))/(2*eps);
-  const slopeZ=(forestHeight(x,z+eps)-forestHeight(x,z-eps))/(2*eps);
-  const rx=isBush?-slopeZ*.35+(randomPlant()-.5)*.22:-slopeZ*.18+(randomPlant()-.5)*.10;
-  const rz=isBush?slopeX*.35+(randomPlant()-.5)*.22:slopeX*.18+(randomPlant()-.5)*.08;
-  // GH-31 secondary diversity: deterministic per-plant age/species accent.
-  // Same RNG call count as before (placement sequence preserved); same total
-  // counts, zones, clearing/stream exclusions. Only tint + silhouette vary to
-  // avoid a monoculture read without adding clutter or new assets.
-  const isFern=/fern/i.test(name);
-  const greenBase=randomPlant(),blueBase=randomPlant(),sxBase=randomPlant(),szBase=randomPlant(),rotBase=randomPlant(),tintBase=randomPlant();
-  const accent=hash(Math.round(x*23.7)+seed%977,Math.round(z*23.7)+seed%613);
-  let green,blue,tint,sxMul,syMul,szMul;
-  if(isFern){
-   // Correlated plant-scale variation rather than per-leaf neon noise.  The
-   // texture supplies the fine colour detail; instance colour only separates
-   // mature, shaded and young patches.
-   if(accent<.78){green=.97+greenBase*.05;blue=.92+blueBase*.06;tint=.90+tintBase*.09;sxMul=.85+sxBase*.35;syMul=.92+greenBase*.16;szMul=.85+szBase*.35;}
-   else if(accent<.90){green=.94+greenBase*.05;blue=.88+blueBase*.06;tint=.83+tintBase*.10;sxMul=.90+sxBase*.35;syMul=.78+greenBase*.16;szMul=.90+szBase*.35;}
-   else{green=1.00+greenBase*.05;blue=.90+blueBase*.06;tint=.94+tintBase*.08;sxMul=.78+sxBase*.28;syMul=1.02+greenBase*.20;szMul=.78+szBase*.28;}
-  }else if(isBush){
-   if(accent<.68){green=.97+greenBase*.05;blue=.92+blueBase*.06;tint=.89+tintBase*.09;sxMul=.85+sxBase*.35;syMul=.92+greenBase*.16;szMul=.85+szBase*.35;}
-   else if(accent<.84){green=1.00+greenBase*.05;blue=.87+blueBase*.07;tint=.94+tintBase*.08;sxMul=.76+sxBase*.20;syMul=1.06+greenBase*.20;szMul=.76+szBase*.20;}
-   else{green=.95+greenBase*.05;blue=.90+blueBase*.06;tint=.82+tintBase*.10;sxMul=1.06+sxBase*.30;syMul=.80+greenBase*.15;szMul=1.06+szBase*.30;}
-  }else{green=isBush?.96+greenBase*.08:1;blue=isBush?.88+blueBase*.10:.90+blueBase*.08;tint=.80+tintBase*.20;sxMul=.85+sxBase*.35;syMul=1;szMul=.85+szBase*.35;}
-  const branchySolid=family.label.includes('solid branch');
-  const cardBroadleaf=family.label==='paired broadleaf'||family.label==='woody broadleaf';
-  const cardShape=cardBroadleaf?hash(Math.round(x*71)+seed%919,Math.round(z*67)+seed%857):.5;
-  const cardLeanX=cardBroadleaf?(hash(Math.round(x*43)+seed%733,Math.round(z*79)+11)-.5)*.24:0;
-  const cardLeanZ=cardBroadleaf?(hash(Math.round(x*83)+29,Math.round(z*41)+seed%701)-.5)*.24:0;
-  const cardHeight=cardBroadleaf?.76+cardShape*.52:1,cardWidth=cardBroadleaf?.88+(1-cardShape)*.20:1;
-  const branchTiltX=branchySolid?.58+hash(Math.round(x*53)+seed%887,Math.round(z*59)+31)*.34:0;
-  const branchTiltZ=branchySolid?(hash(Math.round(x*61)+17,Math.round(z*47)+seed%809)-.5)*.46:0;
-  // Keep scanned branch masses rooted into the understory. The positive lift
-  // used previously made some leaf sprays look detached and hover in mid-air.
-  family.sets[index].push({x,z,y:forestHeight(x,z)-(branchySolid?.045:.007),sx:s*sxMul*family.widthScale*cardWidth,sy:s*syMul*family.heightScale*cardHeight,sz:s*szMul*family.widthScale*cardWidth,rot:rotBase*TAU,rx:rx*family.tiltScale+branchTiltX+cardLeanX,rz:rz*family.tiltScale+branchTiltZ+cardLeanZ,tint:branchySolid?tint*.82:tint,green:branchySolid?green*.94:green,blue:branchySolid?blue*.78:blue});
- }
- families.forEach((family,fi)=>family.variants.forEach((variant,i)=>{if(!family.sets[i].length)return;const lod=family.lods.get(variant.name),close=lod?family.sets[i].filter(p=>Math.hypot(p.x,p.z-2.65)<family.lodDistance):family.sets[i],far=lod?family.sets[i].filter(p=>Math.hypot(p.x,p.z-2.65)>=family.lodDistance):[];
- variant.parts.forEach(part=>{
-   const material=scanMaterial(part.material,world,wind),low=lod?.parts.find(p=>p.material.name===part.material.name);
-   const familyLabel=families.length>1?` ${family.label}`:'';
-   const familyCardBroadleaf=family.label==='paired broadleaf'||family.label==='woody broadleaf';
-   if(close.length)instances(world,part.geometry,material,close,`${name}${familyLabel} variant ${i+1}`,shadow);
-   if(far.length){
-    // At LOD distance the individual photographed leaf tips are smaller than a
-    // pixel. A slightly lower coverage cutoff lets neighbouring tips resolve as
-    // one branchlet mass instead of alternating black/bright pinholes while the
-    // custom mip chain still preserves the authored total coverage.
-    const farMaterial=scanMaterial(part.material,world,wind);
-    if(farMaterial.alphaTest>0)farMaterial.alphaTest=Math.max(.24,farMaterial.alphaTest*1.08);
-    instances(world,low?.geometry??part.geometry,farMaterial,far,`${name}${familyLabel} variant ${i+1} distant`,shadow);
+   // Sector A: North-East / right of slab
+   [2.2,0.2],[3.2,-0.8],[2.6,1.2],[3.8,0.5],[3.4,-2.0],[2.0,-1.2],[4.2,-1.0],
+   // Sector B: East / South-East
+   [2.8,2.8],[4.0,3.5],[3.6,4.6],[4.8,2.2],[2.5,3.8],[4.4,4.2],[3.2,5.0],
+   // Sector C: South / Rear (behind player)
+   [1.4,5.2],[2.6,6.4],[0.5,6.0],[-1.2,5.5],[1.8,7.8],[-1.8,7.2],[0.2,7.0],[2.2,8.5],
+   // Sector D: Far stream bank (west / southwest across creek)
+   [-3.8,0.5],[-4.5,-1.5],[-4.2,2.4],[-4.8,4.0],[-3.6,4.8],[-4.0,-2.6],[-5.2,1.8],
+   // Sector E: Outer North-East / North woods
+   [6.5,-3.5],[8.0,-8.0],[5.5,-12.0],[10.5,-15.0],[3.5,-18.0],[8.5,-24.0],[-2.5,-14.0],[-1.5,-22.0],
+   // Sector F: Outer East / South-East
+   [7.5,3.0],[10.0,6.5],[8.5,11.0],[13.0,2.0],[15.5,9.0],[12.0,16.0],[6.0,15.0],[11.0,22.0],
+   // Sector G: Outer South / Rear deep forest
+   [1.5,18.0],[6.5,24.0],[-3.5,20.0],[4.0,30.0],[-5.5,28.0],[0.0,36.0],[8.0,38.0],[-7.0,38.0]
+  ];
+  for(let i=0;i<320;i++){
+   if(midground&&i<sparseAnchors.length){
+    const anchor=sparseAnchors[i];
+    const ja=hash(seed%997+i*43,i*71+17)*TAU;
+    const jr=.16+hash(seed%613+i*59,i*31+29)*.30;
+    centers.push([anchor[0]+Math.cos(ja)*jr,anchor[1]+Math.sin(ja)*jr]);
+    continue;
    }
-   // A real shrub is not a single radial sheet. Keep the exact root, but make
-   // the secondary volume unique per plant instead of applying one identical
-   // .79-radian rotation to every clone in the forest.
-   if(layered&&family.layered&&close.length){
-    // The paired broadleaf scan is already made from several photographed leaf
-    // planes. Duplicating it again at mid-distance made a few bushes read as
-    // obvious stacked shells (the "several layers on top of each other" bug).
-    // Keep the extra inner copy only where the player is close enough to resolve
-    // the added 3D volume. Solid scanned branches and the primary shrub can keep
-    // their wider layering range because their silhouette does not collapse into
-    // parallel cards.
-    const layeredDistance=midground
-     ?Math.min(layerMaxDistance,familyCardBroadleaf?4.6:5.2)
-     :(familyCardBroadleaf?Math.min(layerMaxDistance,4.8):layerMaxDistance);
-    const layeredPlacements=close.filter(p=>Math.hypot(p.x,p.z-2.65)<layeredDistance);
-    if(layeredPlacements.length){
-     const detail=part.geometry.clone();
-     detail.computeBoundingBox();detail.computeBoundingSphere();
-     const inner=layeredPlacements.map((p,j)=>{
-      const h1=hash(Math.round(p.x*137)+i*17+j,Math.round(p.z*131)+fi*29),h2=hash(Math.round(p.x*83)+41,Math.round(p.z*97)+j*7);
-      const scale=layerScale*(.84+h1*.26);
-      return{...p,y:(p.y??forestHeight(p.x,p.z))+(.015+h2*.035)*(p.sy??1),rot:(p.rot??0)+.48+h1*1.35+i*.17,
-       rx:(p.rx??0)+(h2-.5)*.16,rz:(p.rz??0)+(h1-.5)*.14,sx:(p.sx??1)*scale,sy:(p.sy??1)*layerYScale*(.90+h2*.18),sz:(p.sz??1)*scale,
-       tint:(p.tint??1)*(.94+h2*.05)};
-     });
-     instances(world,detail,material,inner,`${name}${familyLabel} variant ${i+1} varied inner volume`,shadow);
+   const a=randomPlant()*TAU;
+   const rMin=minRadius||(belt?6:1.3);
+   const r=nearPatches?1.5+randomPlant()*5.5:belt?6+Math.sqrt(randomPlant())*(radius-6):midground?rMin+(randomPlant()*.7+Math.sqrt(randomPlant())*.3)*(radius-rMin):rMin+Math.sqrt((i+randomPlant())/320)*(radius-rMin);
+   const cz=midground?(randomPlant()<.45?.8:2.4):i%2===0?.8:2.2;
+   centers.push([Math.cos(a)*r,Math.sin(a)*r+cz]);
+  }
+  if(!world.foliageSpatialGrid)world.foliageSpatialGrid=new Map();
+  const placedSpatialGrid=world.foliageSpatialGrid;
+  const spatialCellSize=2.0;
+  for(let i=0;i<count;i++){
+   let x,z;
+   if(streamBand){
+    const isDown=streamBand==='downstream'?true:(streamBand==='upstream'?false:(randomPlant()<0.5));
+    const t=Math.pow(randomPlant(),1.15);
+    z=isDown?-0.8-t*(radius-0.8):2.8+t*(radius-2.8);
+    const effX=creekX(z)+creekBankMeander(z);
+    const side=randomPlant()<0.5?1:-1;
+    const hw=creekWidth(z)*0.5;
+    // Roots strictly on dry bank flanks outside water channel, framing from the sides
+    const bankOff=hw+0.75+randomPlant()*0.65;
+    x=effX+side*bankOff;
+   }else if(randomPlant()<(scatterChance??(midground?0.65:0.72))){
+    const a=randomPlant()*TAU;
+    const rMin=minRadius||(belt?6:1.3);
+    const r=nearPatches?1.5+randomPlant()*5.5:belt?6+Math.sqrt(randomPlant())*(radius-6):midground?rMin+(randomPlant()*.7+Math.sqrt(randomPlant())*.3)*(radius-rMin):rMin+Math.sqrt(randomPlant())*(radius-rMin);
+    const cz=randomPlant()<0.5?.8:2.2;
+    x=Math.cos(a)*r;z=Math.sin(a)*r+cz;
+   }else{
+    const c=centers[i%centers.length],a=randomPlant()*TAU,r=Math.sqrt(randomPlant())*cluster;
+    x=c[0]+Math.cos(a)*r;z=c[1]+Math.sin(a)*r;
+   }
+   // Separate the two eye-level woody plants flanking the nearest mature bole
+   // in the rear-facing gameplay view. Their small lateral offsets keep the
+   // surrounding understory while preventing three aligned vertical stems.
+   if(name==='Midground eye-level thickets'&&Math.abs(x-.784552)<.01&&Math.abs(z-14.108006)<.01)x+=1.0;
+   else if(name==='Mixed tall woodland saplings'&&Math.abs(x-7.373122)<.01&&Math.abs(z-14.364954)<.01)x-=1.0;
+   const h=lerp(height[0],height[1],randomPlant());
+   const isBush=/shrub|sapling|heath|understory|fir/i.test(name);
+   const rootY=forestHeight(x,z);
+   const bankRootClearance=isBush?.085:.048;
+   const lowBaseReach=isBush?Math.min(.12,(families[0].variants[0].baseRadius??0)*(h/.4)*families[0].widthScale):Math.min(.08,(families[0].variants[0].baseRadius??0)*(h/.4)*.55*families[0].widthScale);
+   const baseBankMargin=(isBush?.20:.12)+lowBaseReach;
+   const slabMargin=Math.min(.08,.008+lowBaseReach);
+   if((name==='Midground screening bushes'&&ritualSlabMarkedBush(x,z))||rootY<W+bankRootClearance||!placeAllowed(x,z,h,baseBankMargin,slabMargin)||Math.hypot(x,z-2.65)<near)continue;
 
-     // Only the player-resolvable bushes get a third, much smaller lobe.  It is
-     // still the same root and species, but breaks the last obvious X/fan read
-     // without multiplying the entire mid/far forest cost.
-     const nearInner=layeredPlacements.filter(p=>Math.hypot(p.x,p.z-2.65)<4.6).map((p,j)=>{
-      const h1=hash(Math.round(p.x*173)+j*11,Math.round(p.z*149)+i*31),h2=hash(Math.round(p.x*71)+19,Math.round(p.z*67)+j*13);
-      const scale=layerScale*(.50+h1*.16);
-      return{...p,y:(p.y??forestHeight(p.x,p.z))+(.05+h2*.06)*(p.sy??1),rot:(p.rot??0)-.62-h1*1.18,
-       rx:(p.rx??0)+(h1-.5)*.22,rz:(p.rz??0)+(h2-.5)*.20,sx:(p.sx??1)*scale,sy:(p.sy??1)*layerYScale*(.58+h2*.14),sz:(p.sz??1)*scale,
-       tint:(p.tint??1)*(.91+h1*.06)};
-     });
-     if(nearInner.length)instances(world,detail,material,nearInner,`${name}${familyLabel} variant ${i+1} close crown lobe`,shadow);
-
-     // A fourth, offset lobe on only the closest resolvable shrubs turns the
-     // remaining sparse red-stem/fan silhouettes into a compact woody volume.
-     // Keep it smaller than the authored shell so it fills interior voids
-     // without inflating the plant footprint or moving the root.
-     const closeCore=layeredPlacements.filter((p,j)=>Math.hypot(p.x,p.z-2.65)<3.0&&hash(Math.round(p.x*211)+j*31,Math.round(p.z*199)+i*13)>.48).map((p,j)=>{
-      const h1=hash(Math.round(p.x*191)+j*23+i*5,Math.round(p.z*181)+fi*17),h2=hash(Math.round(p.x*101)+29,Math.round(p.z*109)+j*19);
-      const scale=layerScale*(.39+h1*.13);
-      return{...p,y:(p.y??forestHeight(p.x,p.z))+(.10+h2*.07)*(p.sy??1),rot:(p.rot??0)+1.48+h1*.92,
-       rx:(p.rx??0)+(h2-.5)*.25,rz:(p.rz??0)+(h1-.5)*.22,sx:(p.sx??1)*scale,sy:(p.sy??1)*layerYScale*(.48+h2*.12),sz:(p.sz??1)*scale,
-       tint:(p.tint??1)*(.90+h2*.05)};
-     });
-     if(closeCore.length)instances(world,detail,material,closeCore,`${name}${familyLabel} variant ${i+1} close woody core`,shadow);
+   // Stacking & proximity separation
+   const scx=Math.floor(x/spatialCellSize),scz=Math.floor(z/spatialCellSize);
+   let hasOverlapConflict=false;
+   for(let cdx=-1;cdx<=1&&!hasOverlapConflict;cdx++){
+    for(let cdz=-1;cdz<=1&&!hasOverlapConflict;cdz++){
+     const cellList=placedSpatialGrid.get(`${scx+cdx},${scz+cdz}`);
+     if(cellList){
+      for(let ci=0;ci<cellList.length;ci++){
+       const ep=cellList[ci];
+       const distSq=(x-ep.x)**2+(z-ep.z)**2;
+       const heightDiff=Math.abs(h-ep.h);
+       const minSep=heightDiff>0.28?0.16:(isBush?0.32:0.22);
+       if(distSq<minSep*minSep){hasOverlapConflict=true;break;}
+      }
+     }
     }
    }
-  });
- }));
- world.environmentCounts??={};world.environmentCounts[name]=families.reduce((sum,f)=>sum+f.sets.reduce((n,p)=>n+p.length,0),0);
-}
+   if(hasOverlapConflict)continue;
+
+   // Anti-spam local variety: rotate species if duplicate within 1.9m
+   let familyRoll=hash(Math.round(x*31.7)+seed%991,Math.round(z*31.7)+seed%659);
+   let familyIndex=chooseFamily(familyRoll);
+   const creekMeanderZ=creekBankMeander(z);
+   const effXAtZ=creekX(z)+creekMeanderZ;
+   const distToCreekCenter=Math.abs(x-effXAtZ);
+   // Swap first stream-bordering bushes along downstream sightline:
+   // replace bare vertical stalk broadleaf with lush side-growing leafy shrubs
+   if(isBush&&z>-10.0&&z<0.5&&distToCreekCenter<creekWidth(z)*0.5+2.6){
+    if(families[familyIndex].label.includes('paired broadleaf')){
+     const leafyIndex=families.findIndex(f=>f.label.includes('dense green bush')||f.label.includes('woody broadleaf'));
+     if(leafyIndex!==-1)familyIndex=leafyIndex;
+    }
+   }
+   if(isBush&&families.length>1){
+    for(let attempt=0;attempt<families.length;attempt++){
+     const testFamilyIndex=(familyIndex+attempt)%families.length;
+     const testFamily=families[testFamilyIndex];
+     const testSpecies=testFamily.label;
+     let hasSameSpeciesNearby=false;
+     for(let cdx=-1;cdx<=1&&!hasSameSpeciesNearby;cdx++){
+      for(let cdz=-1;cdz<=1&&!hasSameSpeciesNearby;cdz++){
+       const cellList=placedSpatialGrid.get(`${scx+cdx},${scz+cdz}`);
+       if(cellList){
+        for(let ci=0;ci<cellList.length;ci++){
+         const ep=cellList[ci];
+         if(ep.isBush&&ep.species===testSpecies&&(x-ep.x)**2+(z-ep.z)**2<1.9*1.9){
+          hasSameSpeciesNearby=true;break;
+         }
+        }
+       }
+      }
+     }
+     if(!hasSameSpeciesNearby){
+      familyIndex=testFamilyIndex;
+      break;
+     }
+    }
+   }
+   const family=families[familyIndex];
+   const index=Math.floor(randomPlant()*family.variants.length);
+   const variant=family.variants[index];
+   const s=h/Math.max(.04,variant.height);
+   const cellKey=`${scx},${scz}`;
+   if(!placedSpatialGrid.has(cellKey))placedSpatialGrid.set(cellKey,[]);
+   placedSpatialGrid.get(cellKey).push({x,z,h,isBush,species:family.label});
+
+   // Downstream creek lean: NO excessive tilt! Keep bushes upright on banks.
+   const effCreekX=creekX(z)+creekBankMeander(z);
+   const distToCreek=Math.abs(x-effCreekX);
+   let creekTilt=0;
+   if(z<-8.0&&distToCreek<creekWidth(z)*1.3){
+    const bankSide=Math.sign(x-effCreekX)||1;
+    creekTilt=Math.min(1.0,(-8.0-z)/10.0)*(0.04+randomPlant()*0.03)*bankSide;
+   }
+   const eps=0.25;
+   const slopeX=(forestHeight(x+eps,z)-forestHeight(x-eps,z))/(2*eps);
+   const slopeZ=(forestHeight(x,z+eps)-forestHeight(x,z-eps))/(2*eps);
+   const rx=isBush?-slopeZ*.35+(randomPlant()-.5)*.22:-slopeZ*.18+(randomPlant()-.5)*.10;
+   let rz=isBush?slopeX*.35+(randomPlant()-.5)*.22:slopeX*.18+(randomPlant()-.5)*.08;
+   rz+=creekTilt;
+
+   const isFern=/fern/i.test(name);
+   const greenBase=randomPlant(),blueBase=randomPlant(),sxBase=randomPlant(),szBase=randomPlant(),rotBase=randomPlant(),tintBase=randomPlant();
+   const accent=hash(Math.round(x*23.7)+seed%977,Math.round(z*23.7)+seed%613);
+   let green,blue,tint,sxMul,syMul,szMul;
+   if(isFern){
+    if(accent<.78){green=.97+greenBase*.05;blue=.92+blueBase*.06;tint=.90+tintBase*.09;sxMul=.85+sxBase*.35;syMul=.92+greenBase*.16;szMul=.85+szBase*.35;}
+    else if(accent<.90){green=.94+greenBase*.05;blue=.88+blueBase*.06;tint=.83+tintBase*.10;sxMul=.90+sxBase*.35;syMul=.78+greenBase*.16;szMul=.90+szBase*.35;}
+    else{green=1.00+greenBase*.05;blue=.90+blueBase*.06;tint=.94+tintBase*.08;sxMul=.78+sxBase*.28;syMul=1.02+greenBase*.20;szMul=.78+szBase*.28;}
+   }else if(isBush){
+    if(accent<.68){green=.97+greenBase*.05;blue=.92+blueBase*.06;tint=.89+tintBase*.09;sxMul=.85+sxBase*.35;syMul=.92+greenBase*.16;szMul=.85+szBase*.35;}
+    else if(accent<.84){green=1.00+greenBase*.05;blue=.87+blueBase*.07;tint=.94+tintBase*.08;sxMul=.76+sxBase*.20;syMul=1.06+greenBase*.20;szMul=.76+szBase*.20;}
+    else{green=.95+greenBase*.05;blue=.90+blueBase*.06;tint=.82+tintBase*.10;sxMul=1.06+sxBase*.30;syMul=.80+greenBase*.15;szMul=1.06+szBase*.30;}
+   }else{green=isBush?.96+greenBase*.08:1;blue=isBush?.88+blueBase*.10:.90+blueBase*.08;tint=.80+tintBase*.20;sxMul=.85+sxBase*.35;syMul=1;szMul=.85+szBase*.35;}
+
+   const cardBroadleaf=family.label==='paired broadleaf'||family.label==='woody broadleaf';
+   const cardShape=cardBroadleaf?hash(Math.round(x*71)+seed%919,Math.round(z*67)+seed%857):.5;
+   const cardLeanX=cardBroadleaf?(hash(Math.round(x*43)+seed%733,Math.round(z*79)+11)-.5)*.24:0;
+   const cardLeanZ=cardBroadleaf?(hash(Math.round(x*83)+29,Math.round(z*41)+seed%701)-.5)*.24:0;
+   const cardHeight=cardBroadleaf?.76+cardShape*.52:1,cardWidth=cardBroadleaf?.88+(1-cardShape)*.20:1;
+   family.sets[index].push({x,z,y:forestHeight(x,z)-.007,sx:s*sxMul*family.widthScale*cardWidth,sy:s*syMul*family.heightScale*cardHeight,sz:s*szMul*family.widthScale*cardWidth,rot:rotBase*TAU,rx:rx*family.tiltScale+cardLeanX,rz:rz*family.tiltScale+cardLeanZ,tint,green,blue});
+  }
+  families.forEach((family,fi)=>family.variants.forEach((variant,i)=>{
+   if(!family.sets[i].length)return;
+   const lod=family.lods.get(variant.name);
+   const close=lod?family.sets[i].filter(p=>Math.hypot(p.x,p.z-2.65)<family.lodDistance):family.sets[i];
+   const far=lod?family.sets[i].filter(p=>Math.hypot(p.x,p.z-2.65)>=family.lodDistance):[];
+   variant.parts.forEach(part=>{
+    const material=scanMaterial(part.material,world,wind),low=lod?.parts.find(p=>p.material.name===part.material.name);
+    const familyLabel=families.length>1?` ${family.label}`:'';
+    const familyCardBroadleaf=family.label==='paired broadleaf'||family.label==='woody broadleaf';
+    if(close.length)instances(world,part.geometry,material,close,`${name}${familyLabel} variant ${i+1}`,shadow);
+    if(far.length){
+     const farMaterial=scanMaterial(part.material,world,wind);
+     if(farMaterial.alphaTest>0)farMaterial.alphaTest=Math.max(.24,farMaterial.alphaTest*1.08);
+     instances(world,low?.geometry??part.geometry,farMaterial,far,`${name}${familyLabel} variant ${i+1} distant`,shadow);
+    }
+    if(layered&&family.layered&&close.length){
+     const layeredDistance=midground
+      ?Math.min(layerMaxDistance,familyCardBroadleaf?4.6:5.2)
+      :(familyCardBroadleaf?Math.min(layerMaxDistance,4.8):layerMaxDistance);
+     const layeredPlacements=close.filter(p=>{
+      if(Math.hypot(p.x,p.z-2.65)>=layeredDistance)return false;
+      // Prevent secondary lobes from floating over stream bed
+      const dCreek=Math.abs(p.x-(creekX(p.z)+creekBankMeander(p.z)));
+      if(dCreek<creekWidth(p.z)*0.5+0.75)return false;
+      return true;
+     });
+     if(layeredPlacements.length){
+      const detail=part.geometry.clone();
+      detail.computeBoundingBox();detail.computeBoundingSphere();
+      const inner=layeredPlacements.map((p,j)=>{
+       const h1=hash(Math.round(p.x*137)+i*17+j,Math.round(p.z*131)+fi*29),h2=hash(Math.round(p.x*83)+41,Math.round(p.z*97)+j*7);
+       const scale=layerScale*(.84+h1*.26);
+       return{...p,y:(p.y??forestHeight(p.x,p.z))+(.015+h2*.035)*(p.sy??1),rot:(p.rot??0)+.48+h1*1.35+i*.17,
+        rx:(p.rx??0)+(h2-.5)*.16,rz:(p.rz??0)+(h1-.5)*.14,sx:(p.sx??1)*scale,sy:(p.sy??1)*layerYScale*(.90+h2*.18),sz:(p.sz??1)*scale,
+        tint:(p.tint??1)*(.94+h2*.05)};
+      });
+      instances(world,detail,material,inner,`${name}${familyLabel} variant ${i+1} varied inner volume`,shadow);
+
+      const nearInner=layeredPlacements.filter(p=>Math.hypot(p.x,p.z-2.65)<4.6).map((p,j)=>{
+       const h1=hash(Math.round(p.x*173)+j*11,Math.round(p.z*149)+i*31),h2=hash(Math.round(p.x*71)+19,Math.round(p.z*67)+j*13);
+       const scale=layerScale*(.50+h1*.16);
+       return{...p,y:(p.y??forestHeight(p.x,p.z))+(.05+h2*.06)*(p.sy??1),rot:(p.rot??0)-.62-h1*1.18,
+        rx:(p.rx??0)+(h1-.5)*.22,rz:(p.rz??0)+(h2-.5)*.20,sx:(p.sx??1)*scale,sy:(p.sy??1)*layerYScale*(.58+h2*.14),sz:(p.sz??1)*scale,
+        tint:(p.tint??1)*(.91+h1*.06)};
+      });
+      if(nearInner.length)instances(world,detail,material,nearInner,`${name}${familyLabel} variant ${i+1} close crown lobe`,shadow);
+
+      const closeCore=layeredPlacements.filter((p,j)=>Math.hypot(p.x,p.z-2.65)<3.0&&hash(Math.round(p.x*211)+j*31,Math.round(p.z*199)+i*13)>.48).map((p,j)=>{
+       const h1=hash(Math.round(p.x*191)+j*23+i*5,Math.round(p.z*181)+fi*17),h2=hash(Math.round(p.x*101)+29,Math.round(p.z*109)+j*19);
+       const scale=layerScale*(.39+h1*.13);
+       return{...p,y:(p.y??forestHeight(p.x,p.z))+(.10+h2*.07)*(p.sy??1),rot:(p.rot??0)+1.48+h1*.92,
+        rx:(p.rx??0)+(h2-.5)*.25,rz:(p.rz??0)+(h1-.5)*.22,sx:(p.sx??1)*scale,sy:(p.sy??1)*layerYScale*(.48+h2*.12),sz:(p.sz??1)*scale,
+        tint:(p.tint??1)*(.90+h2*.05)};
+      });
+      if(closeCore.length)instances(world,detail,material,closeCore,`${name}${familyLabel} variant ${i+1} close woody core`,shadow);
+     }
+    }
+   });
+  }));
+  world.environmentCounts??={};world.environmentCounts[name]=families.reduce((sum,f)=>sum+f.sets.reduce((n,p)=>n+p.length,0),0);
+ }
 export function plantFerns(world,model,lodModel){
- plantModel(world,model,{name:'Stream-bank fern colonies',seed:3511,count:1200,radius:28,height:[.24,.68],cluster:2.4,near:1.0,wind:.020,lodModel,lodDistance:2.2,shadow:false});
- plantModel(world,model,{name:'Woodland fern carpets',seed:3577,count:1400,radius:38,height:[.20,.58],cluster:3.0,near:1.1,wind:.016,lodModel,lodDistance:2.2,shadow:false});
- plantModel(world,model,{name:'Midground fern understory',seed:41022,count:550,minRadius:1.8,radius:12.5,midground:true,height:[.28,.66],cluster:2.2,near:1.0,wind:.018,lodModel,lodDistance:2.2,shadow:false});
+ plantModel(world,model,{name:'Stream-bank fern colonies',seed:3511,count:1600,radius:36,height:[.24,.68],cluster:2.4,near:1.0,wind:.020,lodModel,lodDistance:8.0,shadow:false});
+ plantModel(world,model,{name:'Woodland fern carpets',seed:3577,count:2000,radius:44,height:[.20,.58],cluster:2.8,near:1.1,wind:.016,lodModel,lodDistance:8.0,shadow:false});
+ plantModel(world,model,{name:'Midground fern understory',seed:41022,count:650,minRadius:1.8,radius:13.5,midground:true,height:[.28,.66],cluster:2.2,near:1.0,wind:.018,lodModel,lodDistance:8.0,shadow:false});
+ plantModel(world,model,{name:'Downstream stream-bank ferns',seed:61129,count:550,radius:36,streamBand:'downstream',height:[.28,.74],cluster:1.6,near:1.2,wind:.022,lodModel,lodDistance:8.0,shadow:false});
+ plantModel(world,model,{name:'Upstream stream-bank ferns',seed:72341,count:500,radius:36,streamBand:'upstream',height:[.28,.74],cluster:1.6,near:1.2,wind:.022,lodModel,lodDistance:8.0,shadow:false});
+ plantModel(world,model,{name:'Distant woodland ferns',seed:58211,count:2800,minRadius:10.0,radius:48,height:[.22,.64],cluster:2.8,near:2.0,wind:.014,lodModel,lodDistance:18.0,shadow:false});
+ plantModel(world,model,{name:'Perimeter slope ferns',seed:69103,count:2400,minRadius:22.0,radius:56,height:[.24,.68],cluster:3.0,near:2.5,wind:.012,lodModel,lodDistance:18.0,shadow:false});
 }
-export function plantShrubs(world,model,lodModel,broadleafModel=null,broadleafLod=null,solidBroadleafModel=null){
- const families=(cardWeight,solidWeight,lodDistance)=>{
+export function plantShrubs(world,model,lodModel,broadleafModel=null,broadleafLod=null,solidBroadleafModel=null,shrub02Model=null,shrub02Lod=null){
+ // GH-pass05: removed solidBroadleafModel (shrub_01) – its opaque branch cards
+ // with 2K JPEG textures looked blurry and dated compared to the photogrammetry scans.
+ // All weight redistributed among the three crisp RGBA-atlas species:
+ // shrub_03 (paired broadleaf), shrub_04 (woody broadleaf), shrub_02 (dense green bush).
+ const families=(p3Weight,p4Weight,p2Weight,lodDistance)=>{
   const result=[];
-  if(broadleafModel)result.push({model:broadleafModel,lodModel:broadleafLod,weight:cardWeight,lodDistance,label:'paired broadleaf',widthScale:.90,heightScale:1.00,tiltScale:1.28});
-  // shrub_01 is a real scanned branch with individually modelled leaf geometry.
-  // Use it sparingly as the woody core of bushes: it contributes genuine depth
-  // and curved leaf silhouettes without reproducing the repeated alpha-card
-  // carpet. Its source branch is long and low, so compress X/Z and allow more
-  // pitch/roll variation. Never layer-clone this expensive solid mesh.
-  if(solidBroadleafModel)result.push({model:solidBroadleafModel,lodModel:null,weight:solidWeight,lodDistance,label:'solid branchy broadleaf',widthScale:.18,heightScale:.96,tiltScale:1.38,layered:false});
+  if(broadleafModel)result.push({model:broadleafModel,lodModel:broadleafLod,weight:p3Weight,lodDistance,label:'paired broadleaf',widthScale:.92,heightScale:1.00,tiltScale:1.20});
+  if(model)result.push({model,lodModel,weight:p4Weight,lodDistance,label:'woody broadleaf',widthScale:.92,heightScale:.98,tiltScale:1.18});
+  if(shrub02Model)result.push({model:shrub02Model,lodModel:shrub02Lod,weight:p2Weight,lodDistance,label:'dense green bush',widthScale:.92,heightScale:1.02,tiltScale:1.10});
   return result;
  };
- plantModel(world,model,{name:'Low woody heath',seed:9901,count:200,radius:26,height:[.22,.42],cluster:1.7,near:1.4,wind:.012,lodModel,lodDistance:5.0,primaryWeight:.34,visualFamilies:families(.36,.30,6.0),layered:true,layerScale:.84,layerYScale:.90,layerMaxDistance:5.8,scatterChance:.18});
- plantModel(world,model,{name:'Dense woodland bushes',seed:9943,count:240,radius:32,height:[.34,.72],cluster:2.0,near:1.6,wind:.014,lodModel,lodDistance:6.8,primaryWeight:.16,visualFamilies:families(.50,.34,8.2),layered:true,layerMaxDistance:8.2,scatterChance:.16});
- plantModel(world,model,{name:'Screening heath thickets',seed:9987,count:165,radius:32,height:[.58,1.08],cluster:2.1,near:3.0,wind:.010,lodModel,lodDistance:7.8,primaryWeight:.24,visualFamilies:families(.44,.32,9.0),layered:true,layerScale:.72,layerYScale:.86,layerMaxDistance:8.5,scatterChance:.18,shadow:false});
- // In the second visual plane prefer the real scanned solid branch family over
- // the old shrub_04 cards. This removes the remaining low-quality tufts without
- // moving roots or thinning the understory that is already working well.
- plantModel(world,model,{name:'Midground screening bushes',seed:52311,count:125,minRadius:2.2,radius:12.0,midground:true,height:[.40,.82],cluster:1.8,near:1.6,wind:.014,lodModel,lodDistance:9.0,primaryWeight:.02,visualFamilies:families(.38,.60,9.5),layered:true,layerScale:.74,layerMaxDistance:8.0,scatterChance:.16,shadow:false});
- plantModel(world,model,{name:'Midground heath thickets',seed:52345,count:110,minRadius:2.0,radius:11.5,midground:true,height:[.24,.50],cluster:1.7,near:1.4,wind:.012,lodModel,lodDistance:8.0,primaryWeight:.03,visualFamilies:families(.37,.60,9.0),layered:true,layerScale:.80,layerYScale:.88,layerMaxDistance:7.5,scatterChance:.17,shadow:false});
+ plantModel(world,model,{name:'Low woody heath',seed:9901,count:420,radius:38,height:[.22,.46],cluster:2.6,near:1.4,wind:.012,lodModel,lodDistance:18.0,primaryWeight:.30,visualFamilies:families(.34,.00,.36,18.0),layered:true,layerScale:.84,layerYScale:.90,layerMaxDistance:5.8,scatterChance:.55});
+ plantModel(world,model,{name:'Dense woodland bushes',seed:9943,count:520,radius:42,height:[.34,.74],cluster:2.8,near:1.8,wind:.014,lodModel,lodDistance:18.0,primaryWeight:.28,visualFamilies:families(.36,.00,.36,18.0),layered:true,layerMaxDistance:7.0,scatterChance:.65});
+ plantModel(world,model,{name:'Screening heath thickets',seed:9987,count:420,radius:44,minRadius:4.0,height:[.85,1.75],cluster:3.0,near:3.2,wind:.010,lodModel,lodDistance:20.0,primaryWeight:.28,visualFamilies:families(.36,.00,.36,20.0),layered:true,layerScale:.72,layerYScale:.86,layerMaxDistance:7.5,scatterChance:.72,shadow:false});
+ plantModel(world,model,{name:'Eye-level screening thickets',seed:94812,count:480,radius:44,minRadius:4.5,height:[1.35,2.45],cluster:3.2,near:3.6,wind:.010,lodModel,lodDistance:20.0,primaryWeight:.28,visualFamilies:families(.36,.00,.36,20.0),layered:true,layerScale:.70,layerYScale:.88,layerMaxDistance:7.0,scatterChance:.75,shadow:false});
+ plantModel(world,model,{name:'Midground eye-level thickets',seed:96119,count:220,minRadius:3.8,radius:18.0,midground:true,height:[1.20,2.15],cluster:2.6,near:3.5,wind:.011,lodModel,lodDistance:20.0,primaryWeight:.28,visualFamilies:families(.36,.00,.36,20.0),layered:true,layerScale:.72,layerMaxDistance:8.0,scatterChance:.68,shadow:false});
+ plantModel(world,model,{name:'Tall woodland understory saplings',seed:95341,count:450,radius:48,minRadius:5.5,height:[1.50,2.85],cluster:3.2,near:3.8,wind:.009,lodModel,lodDistance:22.0,primaryWeight:.30,visualFamilies:families(.35,.00,.35,22.0),layered:false,scatterChance:.75,shadow:false});
+ plantModel(world,model,{name:'Midground screening bushes',seed:52311,count:180,minRadius:3.0,radius:13.5,midground:true,height:[.45,.88],cluster:2.4,near:2.8,wind:.014,lodModel,lodDistance:20.0,primaryWeight:.24,visualFamilies:families(.38,.00,.38,20.0),layered:true,layerScale:.74,layerMaxDistance:8.0,scatterChance:.65,shadow:false});
+ plantModel(world,model,{name:'Midground heath thickets',seed:52345,count:160,minRadius:2.4,radius:12.5,midground:true,height:[.26,.52],cluster:2.2,near:2.2,wind:.012,lodModel,lodDistance:20.0,primaryWeight:.26,visualFamilies:families(.38,.00,.36,20.0),layered:true,layerScale:.80,layerYScale:.88,layerMaxDistance:7.5,scatterChance:.60,shadow:false});
+ plantModel(world,model,{name:'Downstream stream-canopy bushes',seed:81203,count:340,radius:36,streamBand:'downstream',height:[.42,.92],cluster:2.2,near:1.6,wind:.014,lodModel,lodDistance:18.0,primaryWeight:.28,visualFamilies:families(.36,.00,.36,18.0),scatterChance:.45,shadow:false});
+ plantModel(world,model,{name:'Upstream stream-canopy bushes',seed:81299,count:300,radius:36,streamBand:'upstream',height:[.42,.92],cluster:2.2,near:1.6,wind:.014,lodModel,lodDistance:18.0,primaryWeight:.28,visualFamilies:families(.36,.00,.36,18.0),scatterChance:.45,shadow:false});
+ plantModel(world,model,{name:'Outer woodland thickets',seed:63491,count:750,minRadius:8.0,radius:50,height:[.85,1.85],cluster:3.0,near:3.6,wind:.012,lodModel,lodDistance:22.0,primaryWeight:.30,visualFamilies:families(.35,.00,.35,22.0),layered:false,scatterChance:.75,shadow:false});
+ plantModel(world,model,{name:'Distant slope understory',seed:74823,count:700,minRadius:12.0,radius:54,height:[.75,1.75],cluster:3.2,near:3.8,wind:.010,lodModel,lodDistance:22.0,primaryWeight:.30,visualFamilies:families(.35,.00,.35,22.0),layered:false,scatterChance:.75,shadow:false});
+ plantModel(world,model,{name:'Far perimeter brush',seed:88129,count:600,minRadius:18.0,radius:58,height:[.80,1.80],cluster:3.2,near:4.0,wind:.010,lodModel,lodDistance:22.0,primaryWeight:.30,visualFamilies:families(.35,.00,.35,22.0),layered:false,scatterChance:.75,shadow:false});
 }
 export function plantGrass(world,model,lodModel){
  plantModel(world,model,{name:'Low woodland grasses',seed:81351,count:4200,radius:38,height:[.055,.16],cluster:2.6,near:.5,wind:.016,shadow:false,variantPattern:/small|mid/,lodModel,lodDistance:2.2});
@@ -898,6 +978,23 @@ function appendBranchCylinder(positions,uvs,colors,indices,start,end,radiusStart
  }
  for(let ring=0;ring<rings;ring++)for(let i=0;i<segs;i++){
   const n=(i+1)%segs,a=at+ring*segs+i,b=at+ring*segs+n,c=at+(ring+1)*segs+i,d=at+(ring+1)*segs+n;
+  indices.push(a,b,c,b,d,c);
+ }
+}
+
+function appendTreeBole(positions,uvs,colors,indices,fractions,centerAt,radiusAt,segments,color,height){
+ const first=positions.length/3;
+ for(const f of fractions){
+  const center=centerAt(f),radius=radiusAt(f),shade=1-f*.20;
+  for(let i=0;i<segments;i++){
+   const angle=i/segments*TAU;
+   positions.push(center.x-Math.sin(angle)*radius,center.y,center.z-Math.cos(angle)*radius);
+   uvs.push(i/segments*1.35,f*height*2.15);
+   colors.push(color[0]*shade,color[1]*shade,color[2]*shade);
+  }
+ }
+ for(let ring=0;ring<fractions.length-1;ring++)for(let i=0;i<segments;i++){
+  const next=(i+1)%segments,a=first+ring*segments+i,b=first+ring*segments+next,c=first+(ring+1)*segments+i,d=first+(ring+1)*segments+next;
   indices.push(a,b,c,b,d,c);
  }
 }
@@ -1184,16 +1281,17 @@ function pineBranchMaterial(world){
  }
  return m;
 }
-function buildBroadLeafGeometry([u0,u1,v0,v1],width=.48,fold=.055,curl=.040,lowDetail=false){
+function buildBroadLeafGeometry([u0,u1,v0,v1],width=.48,fold=.055,curl=.040,lowDetail=false,compact=false){
  const geometry=new T.BufferGeometry(),positions=[],uvs=[],leafEdge=[],indices=[];
+ const petiole=.38+(width-.44)*5;
  // More outline samples keep solid-geometry leaves from reading as a seven-edge
  // paper cutout against the sky. The leaf stays opaque 3D geometry; only its
  // curved silhouette gets enough segments to resolve like a natural blade.
- const rows=lowDetail?[0,.10,.22,.40,.60,.78,.90,1.0]:[0,.10,.22,.38,.55,.70,.83,.93,1.0];
- const widths=lowDetail?[.035,.24,.43,.50,.46,.32,.16,.02]:[.035,.24,.42,.50,.49,.40,.28,.14,.02];
+ const rows=compact?(lowDetail?[0,.48,1]:[0,.26,.64,1]):lowDetail?[0,.10,.22,.40,.60,.78,.90,1.0]:[0,.10,.22,.38,.55,.70,.83,.93,1.0];
+ const widths=compact?(lowDetail?[0,.63,0]:[0,.475,.497,0]):lowDetail?[.035,.24,.43,.50,.46,.32,.16,.02]:[.035,.24,.42,.50,.49,.40,.28,.14,.02];
  for(let row=0;row<rows.length;row++){
   const t=rows[row],supportScale=lowDetail?1.075:1.045,supportT=(t-.5)*supportScale+.5,w=widths[row]*width*supportScale,ridge=Math.sin(Math.PI*t)*fold,edge=ridge-Math.sin(Math.PI*t)*curl;
-  positions.push(-w,supportT,edge, 0,supportT,ridge, w,supportT,edge);
+  positions.push(-w,supportT+petiole,edge, 0,supportT+petiole,ridge, w,supportT+petiole,edge);
   // Distance to the geometric contour.  Side vertices are exactly on the
   // silhouette while the centre vertex is fully interior.  Fade the centre
   // again at the stem/tip so the shader can soften all parts of the outline,
@@ -1205,11 +1303,24 @@ function buildBroadLeafGeometry([u0,u1,v0,v1],width=.48,fold=.055,curl=.040,lowD
   uvs.push(u0,v,um,v,u1,v);
   if(row===0)continue;
   const a=(row-1)*3,b=row*3;
-  indices.push(a,b,a+1, a+1,b,b+1, a+1,b+1,a+2, a+2,b+1,b+2);
+  // Added leaves retain a folded centre and the same projected area. Their
+  // stem/tip vertices coincide, so omit the zero-area endpoint triangles.
+  if(compact&&row===1)indices.push(a+1,b,b+1, a+1,b+1,b+2);
+  else if(compact&&row===rows.length-1)indices.push(a,b+1,a+1, a+1,b+1,a+2);
+  else indices.push(a,b,a+1, a+1,b,b+1, a+1,b+1,a+2, a+2,b+1,b+2);
  }
+ // A blade is attached through a real leaf stalk. Two crossing strips keep
+ // this small connection visible from oblique player views; unlike the blade
+ // rim, the stalk must not fade away under the leaf-edge coverage shader.
+ const stem=positions.length/3,sw=.020,sy=petiole+.04;
+ positions.push(0,0,0, -sw,sy,0, sw,sy,0, 0,0,0, 0,sy,-sw, 0,sy,sw);
+ for(let i=0;i<6;i++){uvs.push((u0+u1)*.5,(v0+v1)*.5);leafEdge.push(1);}
+ indices.push(stem,stem+1,stem+2,stem+3,stem+5,stem+4);
  geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));
  geometry.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));
  geometry.setAttribute('leafEdge',new T.Float32BufferAttribute(leafEdge,1));
+ const leafRoot=new Float32Array(positions.length/3);leafRoot[stem]=leafRoot[stem+3]=1;
+ geometry.setAttribute('leafRoot',new T.BufferAttribute(leafRoot,1));
  geometry.setIndex(indices);geometry.computeVertexNormals();geometry.computeBoundingBox();geometry.computeBoundingSphere();
  return geometry;
 }
@@ -1270,6 +1381,13 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
   buildBroadLeafGeometry([.730,.910,.575,.900],.44,.050,.038,distant),
   buildBroadLeafGeometry([.720,.910,.185,.550],.48,.058,.043,distant)
  ];
+ const fillGeometries=[
+  buildBroadLeafGeometry([.405,.600,.640,.965],.50,.060,.045,distant,true),
+  buildBroadLeafGeometry([.220,.410,.205,.580],.46,.052,.040,distant,true),
+  buildBroadLeafGeometry([.730,.910,.575,.900],.44,.050,.038,distant,true),
+  buildBroadLeafGeometry([.720,.910,.185,.550],.48,.058,.043,distant,true)
+ ];
+ const density=new TreeCanopyDensity(world,trees,fillGeometries,material,distant);
  const leafSets=leafGeometries.map(()=>[]),r=random(distant?93417:93411),golden=2.399963229728653;
  const branchData={positions:[],uvs:[],colors:[],indices:[]},up=new T.Vector3(0,1,0),leafAxis=new T.Vector3(0,1,0);
  const wood=[[.43,.36,.28],[.38,.31,.25],[.48,.40,.31]];
@@ -1293,6 +1411,7 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
    const tip=root.clone().addScaledVector(sprayDir,lobeSize*(1.02+r()*.24))
     .addScaledVector(tangent,sideSign*lobeSize*(.035+r()*.035));
    const twigMid=root.clone().lerp(tip,.52).addScaledVector(up,lobeSize*(.035+r()*.045)).addScaledVector(tangent,(r()-.5)*lobeSize*.07);
+   density.twig(treeIndex,root,twigMid,tip,lobeSize,lobeIndex>=50&&lobeIndex<60);
    const twigRadius=Math.max(.004,lobeSize*(distant?.006:.008));
    appendBranchCylinder(branchData.positions,branchData.uvs,branchData.colors,branchData.indices,root,twigMid,twigRadius,twigRadius*.62,4,woodColor);
    appendBranchCylinder(branchData.positions,branchData.uvs,branchData.colors,branchData.indices,twigMid,tip,twigRadius*.62,twigRadius*.16,4,woodColor);
@@ -1325,6 +1444,8 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
     // edge-on slivers/pixel chips. Keep positional variation, but give each
     // clump a coherent base roll with only modest leaf-to-leaf deviation.
     const clumpRoll=clumpPhi*.47+(r()-.5)*.45;
+    const clumpRoot=t<.5?root.clone().lerp(twigMid,t*2):twigMid.clone().lerp(tip,t*2-1);
+    density.shoot(clumpRoot,clumpCenter);
     let clumpTint=(distant?.65:.68)+r()*.08,clumpGreen=.92+r()*.055,clumpBlue=.70+r()*.075;
     if(warm===0||warm===1){clumpTint=.70+r()*.07;clumpGreen=.79+r()*.055;clumpBlue=.43+r()*.075;}
     else if(warm===2){clumpTint=.68+r()*.07;clumpGreen=.86+r()*.05;clumpBlue=.56+r()*.07;}
@@ -1346,6 +1467,9 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
      const hierarchy=cluster===clusters-1?1.06:(cluster%3===0?.90:1.0);
      const size=((distant?.106:.088)+r()*(distant?.044:.074))*hierarchy,variant=(treeIndex*5+lobeIndex*3+spray+cluster+leaf)%leafGeometries.length;
      const pos=clumpCenter.clone().addScaledVector(jitterDir,lobeSize*(.024+r()*.066));
+     // Spread blades along a connected leafy side shoot, preserving the
+     // original clump volume without detached bases or a main-twig sleeve.
+     pos.copy(clumpRoot).lerp(clumpCenter,.12+.88*(leaf+.5)/leavesPerCluster);
      const tint=clumpTint+(r()-.5)*.026,green=clumpGreen+(r()-.5)*.022,blue=clumpBlue+(r()-.5)*.028;
      leafSets[variant].push({x:pos.x,y:pos.y,z:pos.z,sx:size*(1.15+r()*.18),sy:size,sz:size,q:[q.x,q.y,q.z,q.w],tint,green,blue});
     }
@@ -1375,12 +1499,12 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
   }
  };
 
- const addFoliageCloud=(treeIndex,cloudIndex,center,outward,tangent,cloudSize,density=1)=>{
+ const addFoliageCloud=(treeIndex,cloudIndex,center,outward,tangent,cloudSize,cloudDensity=1)=>{
   // Branch wraps can be denser than envelope filler without adding another
   // canopy shell.  A density >1 is used only on real branch runs below; the
   // global volume/top clouds stay at 1 so sky windows and crown separation are
   // preserved.
-  const clumps=Math.max(1,Math.round((distant?6:8)*density)),perClump=Math.max(1,Math.round((distant?7:9)*density));
+  const clumps=Math.max(1,Math.round((distant?6:8)*cloudDensity)),perClump=Math.max(1,Math.round((distant?7:9)*cloudDensity));
   for(let c=0;c<clumps;c++){
    const phi=(cloudIndex+c)*golden+r()*.7;
    const clump=center.clone()
@@ -1396,6 +1520,7 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
     const size=(distant?.110:.08)+r()*(distant?.043:.055),variant=(treeIndex*13+cloudIndex*5+c*3+leaf)%leafGeometries.length;
     const pos=clump.clone().addScaledVector(dir,cloudSize*(r()-.5)*.08);
     leafSets[variant].push({x:pos.x,y:pos.y,z:pos.z,sx:size*(1.10+r()*.15),sy:size,sz:size,q:[q.x,q.y,q.z,q.w],tint:clumpTint+(r()-.5)*.026,green:clumpGreen+(r()-.5)*.022,blue:clumpBlue+(r()-.5)*.028});
+    density.cloudLeaf(treeIndex,leafSets[variant][leafSets[variant].length-1]);
    }
   }
  };
@@ -1404,7 +1529,7 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
   const h=tree.treeHeight??14;
   // Three deterministic crown grammars stop every trunk from wearing the same
   // procedural silhouette.  Roots and overall tree height stay untouched.
-  const archetype=(Math.abs(Math.floor(tree.x*17+tree.z*23))+treeIndex)%3;
+  const archetype=(Math.abs(Math.floor((tree.crownIdentityX??tree.x)*17+tree.z*23))+treeIndex)%3;
   const parentCount=distant?(archetype===2?6:5):([5,5,6][archetype]);
   // Bring only the lowest living structure down a small amount. The goal is a
   // fuller woodland crown, not a different tree silhouette or low orchard tree.
@@ -1416,24 +1541,29 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
   // branches actually originate from its current centre line.  Root position,
   // total height and deterministic tree identity stay unchanged.
   const trunkPhase=(tree.rot??0)+archetype*.71,leanA=.010+archetype*.003,leanB=.006+(treeIndex%3)*.002;
+  // The nearest rear-view bole projects across only a few broad polygon faces,
+  // which makes one trunk read as several parallel stems. Give that one tree a
+  // narrower, rounder cross-section while leaving its root and crown untouched.
+  const rearViewBole=!distant&&Math.abs(tree.x-.747948)<.001&&Math.abs(tree.z-6.434239)<.001;
+  const trunkBaseRatio=distant?.017:(rearViewBole?.0105:.0195),trunkSides=distant?7:(rearViewBole?32:10);
+  const boleRadius=f=>h*trunkBaseRatio*(1-f*.72);
   const trunkCenter=f=>new T.Vector3(
    tree.x+Math.cos(trunkPhase)*h*leanA*Math.pow(f,1.35)+Math.cos(trunkPhase+1.73)*h*leanB*Math.sin(f*Math.PI*.85),
    tree.y+h*f,
    tree.z+Math.sin(trunkPhase)*h*leanA*Math.pow(f,1.35)+Math.sin(trunkPhase+1.73)*h*leanB*Math.sin(f*Math.PI*.85)
   );
   const trunkFractions=[0,.18,.36,.54,.70,.80],trunkWood=wood[(treeIndex+archetype)%wood.length];
-  for(let s=0;s<trunkFractions.length-1;s++){
-   const f0=trunkFractions[s],f1=trunkFractions[s+1],r0=h*((distant?.017:.0195)*(1-f0*.72)),r1=h*((distant?.017:.0195)*(1-f1*.72));
-   appendBranchCylinder(branchData.positions,branchData.uvs,branchData.colors,branchData.indices,trunkCenter(f0),trunkCenter(f1),r0,r1,distant?7:10,trunkWood);
-  }
+  appendTreeBole(branchData.positions,branchData.uvs,branchData.colors,branchData.indices,trunkFractions,trunkCenter,boleRadius,trunkSides,trunkWood,h);
   const crownVoidAngle=(tree.rot??0)+.62+archetype*.47+(treeIndex%5)*.19;
   for(let p=0;p<parentCount;p++){
    const pf=(p+.45)/parentCount,angle=(tree.rot??0)+p*golden+(r()-.5)*.52,ca=Math.cos(angle),sa=Math.sin(angle),tangent=new T.Vector3(-sa,0,ca);
-   const baseY=tree.y+h*(crownBase+pf*verticalSpan+(r()-.5)*.035),trunkR=h*.012*(1-pf*.22),parentReach=h*(.085+r()*.035)*reachScale;
+   const baseY=tree.y+h*(crownBase+pf*verticalSpan+(r()-.5)*.035),parentReach=h*(.085+r()*.035)*reachScale;
    const baseFrac=Math.min(.79,Math.max(.16,(baseY-tree.y)/h)),trunkAtBase=trunkCenter(baseFrac);
+   const trunkR=boleRadius(baseFrac)*1.04;
    const start=new T.Vector3(trunkAtBase.x+ca*trunkR,trunkAtBase.y,trunkAtBase.z+sa*trunkR);
    const hub=new T.Vector3(tree.x+ca*parentReach,baseY+h*(.075+r()*.060),tree.z+sa*parentReach).addScaledVector(tangent,(r()-.5)*h*.026);
    const mid=start.clone().lerp(hub,.52).addScaledVector(tangent,(r()-.5)*h*.020).addScaledVector(up,h*(.018+r()*.018));
+   density.bough(start,mid,hub,treeIndex);
    const woodColor=wood[(treeIndex+p)%wood.length],parentRadius=h*(distant?.0021:.0044)*(1-pf*.25);
    appendBranchCylinder(branchData.positions,branchData.uvs,branchData.colors,branchData.indices,start,mid,parentRadius,parentRadius*.68,distant?4:6,woodColor);
    appendBranchCylinder(branchData.positions,branchData.uvs,branchData.colors,branchData.indices,mid,hub,parentRadius*.68,parentRadius*.38,distant?4:6,woodColor);
@@ -1467,6 +1597,7 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
     const center=new T.Vector3(tree.x+cca*radialReach,tree.y+h*hFrac,tree.z+ssa*radialReach)
      .addScaledVector(childTangent,(r()-.5)*h*.035).addScaledVector(outward,(r()-.5)*h*.018);
     const childMid=hub.clone().lerp(center,.56).addScaledVector(childTangent,(r()-.5)*h*.022).addScaledVector(up,h*(.018+r()*.022));
+    density.bough(hub,childMid,center,treeIndex);
     appendBranchCylinder(branchData.positions,branchData.uvs,branchData.colors,branchData.indices,hub,childMid,parentRadius*.34,parentRadius*.18,distant?4:5,woodColor);
     appendBranchCylinder(branchData.positions,branchData.uvs,branchData.colors,branchData.indices,childMid,center,parentRadius*.18,parentRadius*.055,distant?4:5,woodColor);
     const massCode=(treeIndex*11+p*5+c*3)%7,massScale=massCode===0?1.14:(massCode===1?.92:1),lobeSize=h*(distant?.060:.082)*(.72+r()*.46)*lobeScale*massScale,lobeIndex=p*6+c*2;
@@ -1499,13 +1630,14 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
     addFoliageCloud(treeIndex,300+lobeIndex,center,outward,childTangent,lobeSize*.94,distant?1.10:1.06);
    }
   }
-  const lowerSideCount=distant?3:(tree.distance>18?2:0);
+  const lowerSideCount=distant?3:((tree.crownIdentityDistance??tree.distance)>18?2:0);
   for(let lower=0;lower<lowerSideCount;lower++){
    const angle=(tree.rot??0)+(lower+.72)*golden+(treeIndex%4)*.21+(r()-.5)*.30,ca=Math.cos(angle),sa=Math.sin(angle),tangent=new T.Vector3(-sa,0,ca);
    const yFrac=.47+lower*.055+(r()-.5)*.025,outward=new T.Vector3(ca,.13+lower*.055,sa).normalize();
    const radial=h*(distant?.105:.125)*(.88+r()*.24),center=new T.Vector3(tree.x+ca*radial,tree.y+h*yFrac,tree.z+sa*radial).addScaledVector(tangent,(r()-.5)*h*.024);
    const start=trunkCenter(yFrac-.13);
    const mid=start.clone().lerp(center,.58).addScaledVector(up,h*(.012+r()*.012));
+   density.bough(start,mid,center,treeIndex);
    const woodColor=wood[(treeIndex+lower+2)%wood.length],radius=h*(distant?.0018:.0028);
    appendBranchCylinder(branchData.positions,branchData.uvs,branchData.colors,branchData.indices,start,mid,radius,radius*.56,distant?4:5,woodColor);
    appendBranchCylinder(branchData.positions,branchData.uvs,branchData.colors,branchData.indices,mid,center,radius*.56,radius*.10,distant?4:5,woodColor);
@@ -1546,6 +1678,7 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
    const angle=(tree.rot??0)+(a+.35)*golden+(r()-.5)*.40,ca=Math.cos(angle),sa=Math.sin(angle),outward=new T.Vector3(ca,.52,sa).normalize(),tangent=new T.Vector3(-sa,0,ca);
    const startFrac=.69+a*.035,start=trunkCenter(Math.min(.80,startFrac)),centerBase=trunkCenter(.80),center=new T.Vector3(centerBase.x+ca*h*(.045+r()*.035),tree.y+h*(.86+a*.045+r()*.025),centerBase.z+sa*h*(.045+r()*.035));
    const woodColor=wood[(treeIndex+a+1)%wood.length],radius=h*(distant?.0015:.0027),mid=start.clone().lerp(center,.55).addScaledVector(tangent,(r()-.5)*h*.018);
+   density.bough(start,mid,center,treeIndex);
    appendBranchCylinder(branchData.positions,branchData.uvs,branchData.colors,branchData.indices,start,mid,radius,radius*.48,distant?4:5,woodColor);
    appendBranchCylinder(branchData.positions,branchData.uvs,branchData.colors,branchData.indices,mid,center,radius*.48,radius*.08,distant?4:5,woodColor);
    // The highest visible twigs were still reading as a bare line followed by a
@@ -1561,15 +1694,20 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
   }
  });
 
+ density.build();
+
  if(branchData.indices.length){
   const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(branchData.positions,3));g.setAttribute('uv',new T.Float32BufferAttribute(branchData.uvs,2));g.setAttribute('color',new T.Float32BufferAttribute(branchData.colors,3));g.setIndex(branchData.indices);g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere();
   const branchMesh=addMesh(world,g,pineBranchMaterial(world),`${distant?'Distant':'Mature'} broadleaf structural boughs`);branchMesh.castShadow=!distant;
  }
- if(scanBoughPlacements.length)instances(world,scanBough,scanMaterial,scanBoughPlacements,`${distant?'Distant':'Mature'} scanned broadleaf crown lobes`,!distant);
+ // These source fragments contain blades without their supporting branch
+ // topology. Keep generating the placements to preserve the structural RNG,
+ // but use the attached procedural blades (with the same tissue textures)
+ // for tree crowns rather than rendering disconnected scan fragments.
  leafGeometries.forEach((geometry,i)=>{if(leafSets[i].length)instances(world,geometry,material,leafSets[i],`${distant?'Distant':'Mature'} curved broadleaf leaves v${i+1}`,!distant);});
 }
 
-export function plantPines(world,model,distant=false,leafModel=null){
+export function plantPines(world,model,distant=false,leafModel=null,fullNeedleModel=null){
  const box=new T.Box3().setFromObject(model),height=box.getSize(new T.Vector3()).y,sources=sourceMeshes(model),r=random(distant?81500:71032);
  const canopyPlacements=[],trunkPlacements=[];
  const deadWood=[[2.3,-1.5],[-3.6,2.8],[4.7,4.0],[-5.0,-5.4],[1.6,-7.8],[1.8,-.95],[4.2,3.8],[-4.7,-3.9]];
@@ -1597,6 +1735,27 @@ export function plantPines(world,model,distant=false,leafModel=null){
    const trunkTint=distant?.90+r()*.14:.96+r()*.14;
    trunkPlacements.push({...baseProps,sx:trunkSx,sz:trunkSz,tint:trunkTint});
   }
+  // Break the three-tree alignment behind the player without thinning the
+  // crowns. Small lateral moves separate the trunks while their canopies
+  // continue to overlap; the original identities keep their foliage shapes.
+  if(!distant){
+   const moveTree=(x,z,dx)=>{
+    const index=canopyPlacements.findIndex(p=>Math.abs(p.x-x)<.001&&Math.abs(p.z-z)<.001);
+    if(index<0)return;
+    const p=canopyPlacements[index];p.crownIdentityX=p.x;p.crownIdentityDistance=p.distance;
+    const dy=forestHeight(p.x+dx,p.z)-forestHeight(p.x,p.z);
+    for(const entry of [p,trunkPlacements[index]]){entry.x+=dx;entry.y+=dy;entry.distance=Math.hypot(entry.x,entry.z-2.65);}
+   };
+   // These roots sit on top of the close tree from the player's rear view.
+   // Move the two rear trees together so their crowns stay adjacent, and
+   // nudge the nearer rear tree along the same bank to give each bole space.
+   moveTree(5.325268,26.067422,4.8);
+   moveTree(3.930862,17.363279,.7);
+   moveTree(5.681837,22.792792,4.8);
+   moveTree(8.032379,18.621548,.85);
+  }
+  world.environmentTreeRoots??={};
+  world.environmentTreeRoots[distant?'distant':'mature']=canopyPlacements.map(p=>({x:p.x,y:p.y,z:p.z,height:p.treeHeight}));
   const isBroadleafIndex=i=>leafModel?(distant?i%16!==5:i%20!==7):false;
   const broadleafCanopy=leafModel?canopyPlacements.filter((_,i)=>isBroadleafIndex(i)):[];
   const coniferCanopy=leafModel?canopyPlacements.filter((_,i)=>!isBroadleafIndex(i)):canopyPlacements;
@@ -1616,7 +1775,8 @@ export function plantPines(world,model,distant=false,leafModel=null){
        // dense scanned twig/needle mesh with authored UV islands and natural
        // branchlet breakup.  Reusing that real topology fixes the thin repeated
        // "feather" look while preserving every existing tree root/scale/rotation.
-       const twigGeometry=src.geometry.clone();
+       const needleSource=fullNeedleModel?sourceMeshes(fullNeedleModel).find(m=>m.material.name.includes('twig')):null;
+       const twigGeometry=(needleSource?.geometry??src.geometry).clone();
        twigGeometry.translate(0,-box.min.y,0);
        twigGeometry.computeBoundingBox();twigGeometry.computeBoundingSphere();
        const twigMat=scanMaterial(src.material,world,distant?.006:.011);
@@ -1625,6 +1785,17 @@ export function plantPines(world,model,distant=false,leafModel=null){
        // overlapping real crown layers below, not from near-zero alpha noise.
        twigMat.color.setRGB(.70,.80,.62);twigMat.roughness=.92;twigMat.alphaTest=distant?.28:.24;twigMat.alphaToCoverage=true;
        instances(world,twigGeometry,twigMat,coniferCanopy,`${label}scanned needle crown`,!distant);
+       // The sparse conifer minority was bypassing broadleaf density entirely.
+       // Overlap the existing photographed needle sprays on the same trunks;
+       // smaller inner layers fill gaps without extending detached outer tips.
+       for(let layer=0;layer<(distant?6:2);layer++){
+        const fill=twigGeometry.clone(),scale=.94-layer*.07;
+        fill.rotateY((layer%2?-.49:.67)*(1+Math.floor(layer/2)));
+        fill.scale(scale,1-layer*(distant?.045:.025),scale);
+        fill.translate(0,height*layer*(distant?.043:.022),0);
+        fill.computeBoundingBox();fill.computeBoundingSphere();
+        instances(world,fill,twigMat,coniferCanopy,`${label}connected needle fill ${layer+1}`,!distant);
+       }
        if(!distant){
         // The photographed source tree is naturally open-crowned.  One exact
         // copy leaves mature gameplay trees looking half-dead when repeated.
@@ -1737,50 +1908,43 @@ export async function loadForestDetails(world,gl,texture){
    }
    branchSources.forEach((src,i)=>{const g=groundedGeometry(src),m=scanMaterial(src.material,world),sz=g.boundingBox.getSize(new T.Vector3()),max=Math.max(sz.x,sz.z);const p=branchPositions.filter((_,j)=>j%branchSources.length===i).map(([x,z,s])=>({x,z,s:s/Math.max(.1,max),rot:rB()*TAU,rx:(rB()-.5)*.10,rz:(rB()-.5)*.10,y:forestHeight(x,z)-.022,tint:.80+rB()*.18}));instances(world,g,m,p,'Fallen dry branches',true);});
   };
-  await Promise.all([...world.foliageAlphaReady,floor(),bed(),wood(),
-   plant('shrub_02',{name:'Mixed tall woodland saplings',seed:31351,count:210,radius:34,height:[.52,1.22],cluster:2.4,near:2.0,wind:.016,lodDistance:7.5,primaryWeight:.05,visualIds:[{id:'shrub_03',weight:.95,lodDistance:8.5,label:'broadleaf',widthScale:.96,heightScale:.94,tiltScale:1.20}],layered:true,layerScale:.70,layerYScale:.90,layerMaxDistance:8.5,scatterChance:.22}),
-   plant('shrub_02',{name:'Midground mixed saplings',seed:41921,count:80,minRadius:2.4,radius:12.5,midground:true,height:[.58,1.30],cluster:1.9,near:2.0,wind:.015,lodDistance:8.5,primaryWeight:0,visualIds:[{id:'shrub_03',weight:1,lodDistance:9.0,label:'broadleaf',widthScale:.96,heightScale:.92,tiltScale:1.22}],layered:true,layerScale:.68,layerYScale:.88,layerMaxDistance:7.0,scatterChance:.18,shadow:false}),
-   plant('shrub_03',{name:'Paired-leaf understory',seed:78011,count:220,radius:34,height:[.22,.68],cluster:1.9,near:1.6,wind:.018,lodDistance:6.5,layered:true,layerScale:.82,layerYScale:.90,layerMaxDistance:6.5,scatterChance:.18,shadow:false}),
-   plant('shrub_03',{name:'Midground paired understory',seed:89123,count:90,minRadius:2.0,radius:12.0,midground:true,height:[.26,.72],cluster:1.8,near:1.6,wind:.018,lodDistance:8.5,layered:true,layerScale:.80,layerYScale:.90,layerMaxDistance:8.0,scatterChance:.16,shadow:false}),
-   (async()=>{const [full,medium,far,broad03,broad03Lod,broad04,broad04Lod,solidBroadleaf]=await Promise.all([
+  await Promise.all([...world.foliageAlphaReady,floor(),bed(),wood(),buildForestClutter(world,texture,gl,{infillOnly:true}),
+   plant('shrub_02',{name:'Mixed tall woodland saplings',seed:31351,count:480,radius:48,minRadius:4.5,height:[1.20,2.40],cluster:3.0,near:3.6,wind:.016,lodDistance:20.0,primaryWeight:.34,visualIds:[{id:'shrub_03',weight:.33,lodDistance:20.0,label:'paired broadleaf',widthScale:.96,heightScale:.94,tiltScale:1.20},{id:'shrub_04',weight:.33,lodDistance:20.0,label:'woody broadleaf',widthScale:.96,heightScale:.94,tiltScale:1.20}],layered:true,layerScale:.70,layerYScale:.90,layerMaxDistance:7.0,scatterChance:.72}),
+   plant('shrub_02',{name:'Midground mixed saplings',seed:41921,count:160,minRadius:3.2,radius:16.0,midground:true,height:[.95,2.10],cluster:2.4,near:3.2,wind:.015,lodDistance:20.0,primaryWeight:.34,visualIds:[{id:'shrub_03',weight:.33,lodDistance:20.0,label:'paired broadleaf',widthScale:.96,heightScale:.92,tiltScale:1.22},{id:'shrub_04',weight:.33,lodDistance:20.0,label:'woody broadleaf',widthScale:.96,heightScale:.92,tiltScale:1.22}],layered:true,layerScale:.68,layerYScale:.88,layerMaxDistance:7.0,scatterChance:.65,shadow:false}),
+   plant('shrub_03',{name:'Paired-leaf understory',seed:78011,count:480,radius:46,height:[.24,.75],cluster:2.4,near:1.8,wind:.018,lodDistance:18.0,layered:true,layerScale:.82,layerYScale:.90,layerMaxDistance:6.0,scatterChance:.55,shadow:false}),
+   plant('shrub_03',{name:'Midground paired understory',seed:89123,count:160,minRadius:2.4,radius:14.0,midground:true,height:[.28,.82],cluster:2.0,near:2.2,wind:.018,lodDistance:20.0,layered:true,layerScale:.80,layerYScale:.90,layerMaxDistance:7.5,scatterChance:.50,shadow:false}),
+   (async()=>{const [full,medium,far,broad03,broad03Lod,broad04,broad04Lod]=await Promise.all([
     gl.loadAsync('./assets/fir_sapling/fir_sapling.gltf'),gl.loadAsync('./assets/fir_sapling_lod.glb'),gl.loadAsync('./assets/fir_far_lod.glb'),
     gl.loadAsync('./assets/shrub_03/shrub_03.gltf'),gl.loadAsync('./assets/shrub_03_lod.glb'),
-    gl.loadAsync('./assets/shrub_04/shrub_04.gltf'),gl.loadAsync('./assets/shrub_04_lod.glb'),world.treeLeafReady
+    gl.loadAsync('./assets/shrub_04/shrub_04.gltf'),gl.loadAsync('./assets/shrub_04_lod.glb')
    ]);
-    const lowBroadleafFamilies=(w3,w4,wSolid,lodDistance,cardHeightScale=1,cardWidthScale=1,solidHeightScale=.72,solidWidthScale=.18)=>[
+    // GH-pass05: removed solid branch mass (shrub_01) – blurry opaque cards.
+    // Weight redistributed to crisp photogrammetry broadleaf species only.
+    const lowBroadleafFamilies=(w3,w4,lodDistance,cardHeightScale=1,cardWidthScale=1)=>[
      {model:broad03.scene,lodModel:broad03Lod.scene,weight:w3,lodDistance,label:'paired broadleaf',heightScale:cardHeightScale,widthScale:cardWidthScale,tiltScale:1.22},
-     {model:broad04.scene,lodModel:broad04Lod.scene,weight:w4,lodDistance,label:'woody broadleaf',heightScale:cardHeightScale*.92,widthScale:cardWidthScale*1.02,tiltScale:1.28},
-     {model:solidBroadleaf.scene,lodModel:null,weight:wSolid,lodDistance,label:'solid branch mass',heightScale:solidHeightScale,widthScale:solidWidthScale*.48,tiltScale:1.35,layered:false}
+     {model:broad04.scene,lodModel:broad04Lod.scene,weight:w4,lodDistance,label:'woody broadleaf',heightScale:cardHeightScale*.92,widthScale:cardWidthScale*1.02,tiltScale:1.28}
     ];
-    // The old runtime called the 7.5%-triangle mesh its "near" fir.  Keep the
-    // original photographed/modelled branchlet topology where a player can
-    // actually resolve it, then step down to the old medium asset outside that
-    // band.  Larger/background firs use medium -> far to keep cost controlled.
-    // These scanned fir meshes are excellent up close but become a field of
-    // subpixel black needles once several hundred overlap.  Preserve every root
-    // and scale, but transition to the authored coarser meshes as soon as the
-    // player can no longer resolve individual needles.
-    plantModel(world,full.scene,{name:'Conifer seedlings',seed:14502,count:110,radius:30,height:[.45,1.15],cluster:2.0,near:2.0,wind:.012,lodModel:medium.scene,lodDistance:3.2,primaryWeight:.08,visualFamilies:lowBroadleafFamilies(.24,.14,.54,6.0,.66,.66,.72,.16),scatterChance:.20,shadow:false});
-    plantModel(world,full.scene,{name:'Conifer saplings',seed:28901,count:120,radius:32,height:[1.00,1.90],cluster:2.1,near:2.4,wind:.010,lodModel:medium.scene,lodDistance:4.0,primaryWeight:.08,visualFamilies:lowBroadleafFamilies(.22,.14,.56,7.5,.62,.62,.68,.15),scatterChance:.20,shadow:false});
-    plantModel(world,full.scene,{name:'Midground conifer saplings',seed:33412,count:60,minRadius:2.6,radius:12.5,midground:true,height:[.95,1.85],cluster:1.9,near:2.2,wind:.010,lodModel:medium.scene,lodDistance:4.5,primaryWeight:.06,visualFamilies:lowBroadleafFamilies(.22,.14,.58,9.0,.62,.62,.68,.15),scatterChance:.16,shadow:false});
-    plantModel(world,medium.scene,{name:'Young firs',seed:22281,count:130,radius:34,height:[2.10,4.20],cluster:2.2,near:2.8,wind:.009,lodModel:far.scene,lodDistance:11.5,primaryWeight:.06,visualFamilies:lowBroadleafFamilies(.14,.12,.68,10.5,.56,.50,.42,.105),scatterChance:.17});
-    plantModel(world,medium.scene,{name:'Midground young firs',seed:44198,count:45,minRadius:3.0,radius:13.5,midground:true,height:[1.80,3.90],cluster:2.0,near:2.6,wind:.009,lodModel:far.scene,lodDistance:11.0,primaryWeight:.04,visualFamilies:lowBroadleafFamilies(.14,.12,.70,10.0,.56,.50,.42,.105),scatterChance:.15});
-    plantModel(world,medium.scene,{name:'Wooded slope firs',seed:67812,count:105,radius:42,height:[3.60,7.20],cluster:2.4,near:3.5,belt:true,wind:.006,lodModel:far.scene,lodDistance:12.0,primaryWeight:.04,visualFamilies:lowBroadleafFamilies(.12,.10,.72,11.0,.46,.38,.36,.09),scatterChance:.14,shadow:false});
+    plantModel(world,full.scene,{name:'Conifer seedlings',seed:14502,count:200,radius:44,height:[.45,1.15],cluster:2.2,near:2.2,wind:.012,lodModel:medium.scene,lodDistance:18.0,primaryWeight:.24,visualFamilies:lowBroadleafFamilies(.38,.38,18.0,.66,.66),scatterChance:.45,shadow:false});
+    plantModel(world,full.scene,{name:'Conifer saplings',seed:28901,count:320,radius:48,minRadius:4.5,height:[1.30,2.50],cluster:2.8,near:3.6,wind:.010,lodModel:medium.scene,lodDistance:18.0,primaryWeight:.24,visualFamilies:lowBroadleafFamilies(.38,.38,20.0,.62,.62),scatterChance:.72,shadow:false});
+    plantModel(world,full.scene,{name:'Midground conifer saplings',seed:33412,count:120,minRadius:3.2,radius:15.0,midground:true,height:[1.10,2.15],cluster:2.2,near:3.2,wind:.010,lodModel:medium.scene,lodDistance:20.0,primaryWeight:.22,visualFamilies:lowBroadleafFamilies(.39,.39,20.0,.62,.62),scatterChance:.65,shadow:false});
+    plantModel(world,medium.scene,{name:'Young firs',seed:22281,count:240,radius:50,minRadius:5.5,height:[2.20,4.40],cluster:3.0,near:3.8,wind:.009,lodModel:far.scene,lodDistance:18.0,primaryWeight:.24,visualFamilies:lowBroadleafFamilies(.38,.38,18.0,.56,.50),scatterChance:.70});
+    plantModel(world,medium.scene,{name:'Midground young firs',seed:44198,count:90,minRadius:3.6,radius:16.0,midground:true,height:[1.90,3.80],cluster:2.2,near:3.4,wind:.009,lodModel:far.scene,lodDistance:18.0,primaryWeight:.22,visualFamilies:lowBroadleafFamilies(.39,.39,18.0,.56,.50),scatterChance:.65});
+    plantModel(world,medium.scene,{name:'Wooded slope firs',seed:67812,count:190,radius:50,height:[3.60,7.20],cluster:2.6,near:4.2,belt:true,wind:.006,lodModel:far.scene,lodDistance:20.0,primaryWeight:.22,visualFamilies:lowBroadleafFamilies(.39,.39,20.0,.46,.38),scatterChance:.35,shadow:false});
    })(),
-   (async()=>{const [model,leafAsset]=await Promise.all([gl.loadAsync('./assets/pine_distant.glb'),world.treeLeafReady,world.pineBarkReady,...world.foliageAlphaReady]);plantPines(world,model.scene,true,leafAsset?.scene??null);})()
+   (async()=>{const [model,fullNeedles,leafAsset]=await Promise.all([gl.loadAsync('./assets/pine_distant.glb'),gl.loadAsync('./assets/pine.glb'),world.treeLeafReady,world.pineBarkReady,...world.foliageAlphaReady]);plantPines(world,model.scene,true,leafAsset?.scene??null,fullNeedles.scene);})()
   ]);
  }
 
 export function updateEnvironment(world,dt,sim,settings){
-  const storm=settings.weather==='rain',mist=settings.weather==='mist',morning=sim.upgraded;
-  if(world.daylightDay!==sim.day){world.daylightDay=sim.day;world.sun.position.set(morning?12:-12,morning?18:26,morning?-7:-9);world.sun.color.set(morning?'#f4ecd9':'#ffe8bc');world.stream.material.uniforms.sunDirection.value.copy(world.sun.position).normalize();}
-  world.scene.fog.color.set(storm?'#536052':mist?'#889784':morning?'#5b6f60':'#536657');
+  const storm=settings.weather==='rain',mist=settings.weather==='mist';
+  if(world.daylightDay!==sim.day){world.daylightDay=sim.day;world.sun.position.set(-12,26,-9);world.sun.color.set('#ffe8bc');world.stream.material.uniforms.sunDirection.value.copy(world.sun.position).normalize();}
+  world.scene.fog.color.set(storm?'#536052':mist?'#889784':'#536657');
   world.forestSky.material.uniforms.horizon.value.copy(world.scene.fog.color);
-  world.forestSky.material.uniforms.zenith.value.set(storm?'#687977':mist?'#a4b1a9':morning?'#a0bed2':'#8da8bc');
+  world.forestSky.material.uniforms.zenith.value.set(storm?'#687977':mist?'#a4b1a9':'#8da8bc');
   world.scene.fog.near=storm?10:mist?5:20;world.scene.fog.far=storm?46:mist?36:64;
- world.sun.intensity=storm?.65:mist?1.05:morning?2.8:5.8;
+ world.sun.intensity=storm?.65:mist?1.05:5.8;
  world.renderer.toneMappingExposure=storm?.87:.94;
- if(world.forestHemisphere)world.forestHemisphere.intensity=storm?.95:mist?1.4:morning?1.05:.85;
+ if(world.forestHemisphere)world.forestHemisphere.intensity=storm?.95:mist?1.4:.85;
  if(world.rain)world.rain.visible=storm;
  // Keep the established water appearance and slow only its animation clock.
  // Geometry and normal-map wavelengths/amplitudes stay unchanged.

@@ -103,17 +103,19 @@ test('hit requires a held bottle, open cap, and trapped smoke',()=>{
 test('dry hit has a stronger game cough response',()=>{
  const dry=ready({held:'bottle',smoke:.6,water:0}),wet=ready({held:'bottle',smoke:.6,water:.16});dry.action('hit');wet.action('hit');assert.ok(dry.cough>wet.cough);
 });
-test('ten real charges lead to sleep and the automatic second day',()=>{
- const s=ready();for(let i=0;i<10;i++)ritual(s);assert.equal(s.hits,10);assert.equal(s.stock,0);assert.equal(s.phase,'sleep');assert.equal(s.held,null);
- advance(s,8);assert.equal(s.day,2);assert.equal(s.stock,1000);s.action('bag');assert.equal(s.bud,1);assert.equal(s.mode,'idle');
- s.action('bottle');s.action('stream');assert.equal(s.water,1);s.action('bottle');s.action('lighter');advance(s,20);assert.equal(s.hits,11);assert.equal(s.phase,'free');assert.equal(s.stock,999);
+test('ten real charges deplete supply and refill restores stock to 10',()=>{
+ const s=ready();for(let i=0;i<10;i++)ritual(s);assert.equal(s.hits,10);assert.equal(s.stock,0);assert.equal(s.phase,'free');
+ s.action('bag');assert.equal(s.mode,'idle');
+ assert.equal(s.refill(),true);assert.equal(s.stock,10);
+ s.action('bag');assert.equal(s.mode,'pack');
 });
-test('missing every charge still completes the afternoon',()=>{
- const s=ready();for(let i=0;i<10;i++){s.action('bag');assert.equal(s.pack(false),true);}s.step(.02);assert.equal(s.phase,'sleep');assert.equal(s.lost,10);advance(s,8);assert.equal(s.day,2);
+test('missing every charge depletes supply without sleep and refill replenishes',()=>{
+ const s=ready();for(let i=0;i<10;i++){s.action('bag');assert.equal(s.pack(false),true);}s.step(.02);assert.equal(s.phase,'free');assert.equal(s.lost,10);assert.equal(s.stock,0);
+ assert.equal(s.refill(),true);assert.equal(s.stock,10);
 });
-test('second-day automatic draw needs both a charge and an already held bottle',()=>{
- const empty=ready({day:2,cap:true,water:1,held:'bottle'});empty.action('lighter');assert.notEqual(empty.mode,'auto');advance(empty,20);assert.equal(empty.hits,0);assert.equal(empty.smoke,0);
- const resting=ready({day:2,cap:true,water:1,bud:1});resting.action('lighter');assert.notEqual(resting.mode,'auto');assert.equal(resting.isHeld('bottle'),false);
+test('refill action replenishes herb and keeps manual ritual invariants',()=>{
+ const s=ready({stock:0,cap:true,water:1,held:'bottle'});assert.equal(s.action('refill'),true);assert.equal(s.stock,10);
+ assert.equal(s.isHeld('bottle'),true);
 });
 test('state stays bounded through arbitrary physical inputs and invalid time deltas',()=>{
  const s=ready({water:1,cap:true,bud:1,held:'bottle'});s.action('lighter');for(let i=0;i<10000;i++){
