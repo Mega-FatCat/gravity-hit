@@ -30,6 +30,23 @@ When resolving conflicting information, always follow this strict priority order
 
 ---
 
+## Beta 1 Release Deployment & Boot Quality Selector Fix — 2026-09-19
+**Status**: `[AUTOMATED VERIFIED: 121/121 TESTS PASS; DEPLOYED TO GITHUB PAGES; CURRENT BUILD NEEDS MANUAL CHECK]`
+
+### Summary
+1. **GitHub Pages Deployment Workflow**: Created `.github/workflows/deploy.yml` compiling from `work/game/` with `npm run build` and publishing the static artifact to GitHub Pages. Added comprehensive root `.gitignore` to block ~38 GB of QA images/recordings and cache bloat while preserving all game assets.
+2. **Beta 1 Documentation & Presentation**: Updated `README.md` and `outputs/Play Znicz.md` with complete ritual guides, controls reference (hotbars 1-5, A/D cap threading, Ctrl+2137 cheat), credits, and architecture notes.
+3. **Fresh Save Initialization**: Wiped residual user save states (`progress.json`) so players begin fresh from the clearing entrance.
+4. **Boot Graphics Quality Preset Selector**:
+   - Resolved issue where boot screen appeared forced to 'High' and selector was locked/hidden.
+   - Initialized dropdown options to `Automatic (<Detected>)`, `Low`, `Medium`, `High`.
+   - Maintained default preset as `Automatic` (`settings.quality = 'auto'`), with explicit hardware recommendation display.
+   - Removed timer lock and `.boot-quality.complete select { display: none; }`, enabling seamless, dynamic preset switching before and after loading completes.
+   - Verified 121/121 unit tests pass (`node --test work/game/tests/*.test.mjs`).
+   - Pushed cleanly to `origin/main` (commit `250b7d1`).
+
+---
+
 ## Gameplay Logic & Visual Updates (Cheat, Cap Auto-Stow, Slot Toggle, Tilt Removal, Water Stream, Pipe Offset) — 2026-09-18
 **Status**: `[AUTOMATED VERIFIED: 56/56 GAMEPLAY TESTS PASS; BUILD PASSES; CURRENT BUILD NEEDS MANUAL CHECK]`
 
