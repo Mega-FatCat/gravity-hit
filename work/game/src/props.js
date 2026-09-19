@@ -226,6 +226,7 @@ function rebuildPipe(world){
   pipeGlass.renderOrder=5;
   pipeGlass.castShadow=false;
   pipeGlass.receiveShadow=true;
+  pipeGlass.position.y+=0.016;
   pipe.add(pipeGlass);
   world.pipeGlass=pipeGlass;
 
@@ -249,6 +250,7 @@ function rebuildPipe(world){
   residue.material=residueMaterial;
   residue.renderOrder=4;
   residue.userData.pickable=false;
+  residue.position.y+=0.016;
   if(pipeResidueOrig)pipe.add(residue);
   world.pipeResidue=residue;
 
@@ -285,11 +287,11 @@ function rebuildPipe(world){
   const scale=80.0/96.5;
   world.hotTip.geometry.dispose();
   world.hotTip.geometry=lathe([[.00315,-.004],[.00355,-.004],[.00355,.003],[.00315,.003]],48);
-  world.hotTip.position.set(0,-0.049*scale+0.005,0);
+  world.hotTip.position.set(0,-0.049*scale+0.005+0.016,0);
   world.hotTip.userData.pickable=false;
-  world.bowlBud.position.set(0,0.040*scale,0);
+  world.bowlBud.position.set(0,0.040*scale+0.016,0);
   world.bowlBud.userData.pickable=false;
-  world.emberLight.position.set(0,0.042*scale,0);
+  world.emberLight.position.set(0,0.042*scale+0.016,0);
 
   mark(world,pipe,'pipe');
   world.heroProps.pipe=world.pipeGlass;
@@ -316,7 +318,7 @@ function rebuildPipe(world){
  ];
  const glass=new T.MeshPhysicalMaterial({color:'#f4fbf7',roughness:.035,metalness:0,transmission:1,thickness:.0012,ior:1.474,transparent:false,opacity:1,depthWrite:false,side:T.DoubleSide,envMapIntensity:2.2,clearcoat:.85,clearcoatRoughness:.03});
  borosilicateResponse(glass);
- world.pipeMat=glass;world.pipeGlass=add(pipe,'Slim borosilicate one-hitter',lathe(profile,96),glass);world.pipeGlass.renderOrder=5;
+ world.pipeMat=glass;world.pipeGlass=add(pipe,'Slim borosilicate one-hitter',lathe(profile,96),glass);world.pipeGlass.position.y+=0.016;world.pipeGlass.renderOrder=5;
   // Authentic 28mm knurled water bottle cap geometry for pipe assembly
   world.capmesh.geometry.dispose();world.capmesh.geometry=createCapGeometry(true,64);
   capMaterial.color.set('#1e5236');capMaterial.roughness=.36;capMaterial.metalness=.01;
@@ -330,11 +332,11 @@ function rebuildPipe(world){
   ];
   const residueTexture=createPipeResidueTexture(world);
   const residueMaterial=new T.MeshStandardMaterial({map:residueTexture,roughness:.38,metalness:.02,transparent:true,opacity:1,depthWrite:false,side:T.DoubleSide});
-  const residue=add(pipe,'Inner amber residue',lathe(residueProfile,64),residueMaterial);residue.renderOrder=4;residue.userData.pickable=false;
+  const residue=add(pipe,'Inner amber residue',lathe(residueProfile,64),residueMaterial);residue.position.y+=0.016;residue.renderOrder=4;residue.userData.pickable=false;
   world.pipeResidue=residue;
-  world.hotTip.geometry.dispose();world.hotTip.geometry=lathe([[.00315,-.004],[.00355,-.004],[.00355,.003],[.00315,.003]],48);world.hotTip.position.set(0,-.044,0);world.hotTip.userData.pickable=false;
-  world.bowlBud.position.set(0,.040,0);world.bowlBud.scale.set(1.0,1.0,1.0);world.bowlBud.userData.pickable=false;
-  world.emberLight.position.set(0,.042,0);
+  world.hotTip.geometry.dispose();world.hotTip.geometry=lathe([[.00315,-.004],[.00355,-.004],[.00355,.003],[.00315,.003]],48);world.hotTip.position.set(0,-.044+0.016,0);world.hotTip.userData.pickable=false;
+  world.bowlBud.position.set(0,.040+0.016,0);world.bowlBud.scale.set(1.0,1.0,1.0);world.bowlBud.userData.pickable=false;
+  world.emberLight.position.set(0,.042+0.016,0);
   mark(world,pipe,'pipe');
   world.heroProps.pipe=world.pipeGlass;
  }
@@ -1120,9 +1122,9 @@ export function upgradeHeroProps(world){
  world.bottleSmoke.material.uniforms.uWaterPlane.value=world.liquid.localWaterPlane;
  const scale = world.heroModels?.pipe ? (80.0 / 96.5) : 1.0;
  world.heroAnchors={
-  pipeTip:V(0,-.049*scale,0),
-  bowl:V(0,.045*scale,0),
-  budSeat:V(0,.040*scale,0),
+  pipeTip:V(0,-.049*scale+0.016,0),
+  bowl:V(0,.045*scale+0.016,0),
+  budSeat:V(0,.040*scale+0.016,0),
   bottleMouth:V(0,.226,0),
   outlet:V(.0326,.032,0),
   nozzle:world.nozzle?world.nozzle.clone():V(0,0,0)

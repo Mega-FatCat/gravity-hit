@@ -349,15 +349,16 @@ class RiverbedSpatialGrid {
 // Shared 4K PBR rock textures across all streambed materials
 // Uses the EXACT photogrammetry textures from rock_moss_set_01 (matching the ritual rock slab!)
 // plus micro-normal grain from rock_boulder_dry for sub-millimeter crystalline sharpness.
-let sharedPbrTextures = null;
-function getSharedRockPbr() {
-  if (sharedPbrTextures) return sharedPbrTextures;
+const sharedPbrTextures = new Map();
+function getSharedRockPbr(world) {
+  const tier = world?.profile?.textureTier ?? '4k';
+  if (sharedPbrTextures.has(tier)) return sharedPbrTextures.get(tier);
   const tl = new T.TextureLoader();
   const loadT = (path, srgb = false) => {
     const t = tl.load(path, tex => {
       tex.colorSpace = srgb ? T.SRGBColorSpace : T.NoColorSpace;
       tex.flipY = false;
-      tex.anisotropy = 16;
+      tex.anisotropy = world?.profile?.anisotropy ?? 8;
       tex.minFilter = T.LinearMipmapLinearFilter;
       tex.generateMipmaps = true;
       t.needsUpdate = true;
@@ -365,28 +366,29 @@ function getSharedRockPbr() {
     t.colorSpace = srgb ? T.SRGBColorSpace : T.NoColorSpace;
     t.flipY = false;
     t.wrapS = t.wrapT = T.RepeatWrapping;
-    t.anisotropy = 16;
+    t.anisotropy = world?.profile?.anisotropy ?? 8;
     return t;
   };
-  sharedPbrTextures = {
-    diff: loadT('./assets/rock_moss_set_01/textures/diff_4k.jpg', true),
-    nor: loadT('./assets/rock_moss_set_01/textures/nor_gl_4k.jpg', false),
-    rough: loadT('./assets/rock_moss_set_01/textures/rough_4k.jpg', false),
-    ao: loadT('./assets/rock_moss_set_01/textures/ao_4k.jpg', false),
-    microDiff: loadT('./assets/rock_boulder_dry/diff_4k.jpg', true),
-    microNor: loadT('./assets/rock_boulder_dry/nor_gl_4k.jpg', false),
-    microRough: loadT('./assets/rock_boulder_dry/rough_4k.jpg', false),
-    microAO: loadT('./assets/rock_boulder_dry/ao_4k.jpg', false)
+  const textures = {
+    diff: loadT(`./assets/rock_moss_set_01/textures/diff_${tier}.jpg`, true),
+    nor: loadT(`./assets/rock_moss_set_01/textures/nor_gl_${tier}.jpg`, false),
+    rough: loadT(`./assets/rock_moss_set_01/textures/rough_${tier}.jpg`, false),
+    ao: loadT(`./assets/rock_moss_set_01/textures/ao_${tier}.jpg`, false),
+    microDiff: loadT(`./assets/rock_boulder_dry/diff_${tier}.jpg`, true),
+    microNor: loadT(`./assets/rock_boulder_dry/nor_gl_${tier}.jpg`, false),
+    microRough: loadT(`./assets/rock_boulder_dry/rough_${tier}.jpg`, false),
+    microAO: loadT(`./assets/rock_boulder_dry/ao_${tier}.jpg`, false)
   };
-  return sharedPbrTextures;
+  sharedPbrTextures.set(tier, textures);
+  return textures;
 }
 
 /**
  * Configure 4K Photogrammetric Rock Material with World-Space Triplanar Micro-Detail Shader.
  * Matches the ritual rock slab in quality, micro-grain, normal relief, and wetness response.
  */
-function createStreambedMaterial(name, { baseRoughness = 0.88, sFreq = 16.0, materialClass = 0 } = {}) {
-  const pbr = getSharedRockPbr();
+function createStreambedMaterial(world, name, { baseRoughness = 0.88, sFreq = 16.0, materialClass = 0 } = {}) {
+  const pbr = getSharedRockPbr(world);
   const uMicroDiff = { value: pbr.microDiff };
   const uMicroNormal = { value: pbr.microNor };
   const uMicroRough = { value: pbr.microRough };
@@ -877,7 +879,7 @@ function addStreamWaterSticks(world, spatialGrid) {
     mesh.position.set(best.x, y, best.z);
     mesh.rotation.y = -spec.angle;
     mesh.rotation.z = (count - 1) * 0.035;
-    mesh.castShadow = true;
+    mesh.castShadow = world.profile?.stoneShadows ?? true;
     mesh.receiveShadow = true;
     mesh.userData = { noPick: true, pickable: false };
     group.add(mesh);
@@ -896,7 +898,10 @@ function addStreamWaterSticks(world, spatialGrid) {
  * - Organic flow-field distribution with zero repeating patterns or lines
  * - Clear refill bottle corridor framed with rich 3D pebbles
  */
-export function buildStreambed(world) {
+export async function buildStreambed(world) {
+  const checkpoint=(progress,detail,completed=0,total=0)=>world.loadingCheckpoint?.('terrain',progress,'Packing stream stones',detail,completed,total)??Promise.resolve();
+  await checkpoint(.42,'Preparing stone shapes');
+  world.streambedPbr = getSharedRockPbr(world);
   const r = seededRandom(84291);
   const spatialGrid = new RiverbedSpatialGrid(0.14);
 
@@ -982,29 +987,29 @@ export function buildStreambed(world) {
   });
 
   // 2. High-resolution PBR Materials matching ritual rock slab
-  const boulderMat = createStreambedMaterial('boulder', { baseRoughness: 0.88, sFreq: 16.0, materialClass: 0 });
+  const boulderMat = createStreambedMaterial(world, 'boulder', { baseRoughness: 0.88, sFreq: 16.0, materialClass: 0 });
   const cobbleMats = [
-    createStreambedMaterial('cobble-neutral', { baseRoughness: 0.83, sFreq: 28.0, materialClass: 1, wetFamily: 0.0 }),
-    createStreambedMaterial('cobble-warm', { baseRoughness: 0.87, sFreq: 28.0, materialClass: 1, wetFamily: 0.72 }),
-    createStreambedMaterial('cobble-cool', { baseRoughness: 0.80, sFreq: 28.0, materialClass: 1, wetFamily: -0.62 })
+    createStreambedMaterial(world, 'cobble-neutral', { baseRoughness: 0.83, sFreq: 28.0, materialClass: 1, wetFamily: 0.0 }),
+    createStreambedMaterial(world, 'cobble-warm', { baseRoughness: 0.87, sFreq: 28.0, materialClass: 1, wetFamily: 0.72 }),
+    createStreambedMaterial(world, 'cobble-cool', { baseRoughness: 0.80, sFreq: 28.0, materialClass: 1, wetFamily: -0.62 })
   ];
   const mediumMats = [
-    createStreambedMaterial('medium-neutral', { baseRoughness: 0.83, sFreq: 36.0, materialClass: 1.5, wetFamily: 0.0 }),
-    createStreambedMaterial('medium-warm', { baseRoughness: 0.87, sFreq: 36.0, materialClass: 1.5, wetFamily: 0.82 }),
-    createStreambedMaterial('medium-cool', { baseRoughness: 0.79, sFreq: 36.0, materialClass: 1.5, wetFamily: -0.68 }),
-    createStreambedMaterial('medium-weathered', { baseRoughness: 0.85, sFreq: 36.0, materialClass: 1.5, wetFamily: 0.35 })
+    createStreambedMaterial(world, 'medium-neutral', { baseRoughness: 0.83, sFreq: 36.0, materialClass: 1.5, wetFamily: 0.0 }),
+    createStreambedMaterial(world, 'medium-warm', { baseRoughness: 0.87, sFreq: 36.0, materialClass: 1.5, wetFamily: 0.82 }),
+    createStreambedMaterial(world, 'medium-cool', { baseRoughness: 0.79, sFreq: 36.0, materialClass: 1.5, wetFamily: -0.68 }),
+    createStreambedMaterial(world, 'medium-weathered', { baseRoughness: 0.85, sFreq: 36.0, materialClass: 1.5, wetFamily: 0.35 })
   ];
   const pebbleMats = [
-    createStreambedMaterial('pebble-neutral', { baseRoughness: 0.82, sFreq: 52.0, materialClass: 2, wetFamily: 0.0 }),
-    createStreambedMaterial('pebble-warm', { baseRoughness: 0.86, sFreq: 52.0, materialClass: 2, wetFamily: 0.58 }),
-    createStreambedMaterial('pebble-cool', { baseRoughness: 0.79, sFreq: 52.0, materialClass: 2, wetFamily: -0.52 })
+    createStreambedMaterial(world, 'pebble-neutral', { baseRoughness: 0.82, sFreq: 52.0, materialClass: 2, wetFamily: 0.0 }),
+    createStreambedMaterial(world, 'pebble-warm', { baseRoughness: 0.86, sFreq: 52.0, materialClass: 2, wetFamily: 0.58 }),
+    createStreambedMaterial(world, 'pebble-cool', { baseRoughness: 0.79, sFreq: 52.0, materialClass: 2, wetFamily: -0.52 })
   ];
   const shingleMats = [
-    createStreambedMaterial('shingle-neutral', { baseRoughness: 0.81, sFreq: 56.0, materialClass: 2.5, wetFamily: -0.20 }),
-    createStreambedMaterial('shingle-warm', { baseRoughness: 0.86, sFreq: 56.0, materialClass: 2.5, wetFamily: 0.54 })
+    createStreambedMaterial(world, 'shingle-neutral', { baseRoughness: 0.81, sFreq: 56.0, materialClass: 2.5, wetFamily: -0.20 }),
+    createStreambedMaterial(world, 'shingle-warm', { baseRoughness: 0.86, sFreq: 56.0, materialClass: 2.5, wetFamily: 0.54 })
   ];
-  const gravelMat = createStreambedMaterial('gravel', { baseRoughness: 0.82, sFreq: 95.0, materialClass: 4 });
-  const gritMat = createStreambedMaterial('grit', { baseRoughness: 0.84, sFreq: 160.0, materialClass: 5 });
+  const gravelMat = createStreambedMaterial(world, 'gravel', { baseRoughness: 0.82, sFreq: 95.0, materialClass: 4 });
+  const gritMat = createStreambedMaterial(world, 'grit', { baseRoughness: 0.84, sFreq: 160.0, materialClass: 5 });
 
   world.streambedMaterials = {
     boulderMat,
@@ -1097,6 +1102,7 @@ export function buildStreambed(world) {
     return T.MathUtils.lerp(0.54, 0.94, shape);
   }
 
+  await checkpoint(.45,'Stone materials and shapes ready');
   // --- TIER 0: Class 1 Anchor Boulders (28cm - 46cm) ---
   // Prominent authored anchor boulders placed evenly along the channel reach
   const authoredAnchors = [
@@ -1280,6 +1286,7 @@ export function buildStreambed(world) {
     });
   }
 
+  await checkpoint(.47,'Placing anchor boulders');
   // --- TIER 1: Class 2 River Cobbles (roughly 10cm - 17cm footprint) ---
   // STREAM-BED-01 size rebalance: the photo reference is carried by hand-sized
   // cobbles, not thousands of small pebbles. Sample these deterministically over
@@ -1289,6 +1296,7 @@ export function buildStreambed(world) {
   const cr = seededRandom(48173);
   const cobbleAttempts = 6500;
   for (let attempt = 0; attempt < cobbleAttempts; attempt++) {
+    if (attempt > 0 && attempt % 4096 === 0) await checkpoint(.47+.03*attempt/cobbleAttempts,'Packing hand-sized cobbles',attempt,cobbleAttempts);
     const zEff = -16.0 + cr() * 30.0;
     const hw = creekWidth(zEff) * 0.5;
     const cx = channelX(zEff);
@@ -1367,6 +1375,7 @@ export function buildStreambed(world) {
     });
   }
 
+  await checkpoint(.51,'Cobbles packed',cobbleAttempts,cobbleAttempts);
   // --- TIER 2: dominant medium pebble / small-cobble deposit (6cm - 12cm) ---
   // Candidate sampling is deliberately not row based: stable random candidates
   // cover the whole reach, while broad facies masks form patches and leave
@@ -1377,6 +1386,7 @@ export function buildStreambed(world) {
   const mr = seededRandom(61937);
   const mediumAttempts = 62000;
   for (let attempt = 0; attempt < mediumAttempts; attempt++) {
+    if (attempt > 0 && attempt % 4096 === 0) await checkpoint(.51+.07*attempt/mediumAttempts,'Filling the medium stone mosaic',attempt,mediumAttempts);
     const zEff = -16.0 + mr() * 30.0;
     const hw = creekWidth(zEff) * 0.5;
     const cx = channelX(zEff);
@@ -1493,6 +1503,7 @@ export function buildStreambed(world) {
     else (isNear ? mediumNearPlacements : mediumFarPlacements)[variant].push(item);
   }
 
+  await checkpoint(.59,'Medium stone mosaic packed',mediumAttempts,mediumAttempts);
   // --- TIER 2c: bounded physical coarse-medium repair fill (roughly 11cm - 18cm) ---
   // Fill real remaining voids in the center/far/refill bed after the dominant
   // medium tier has packed. Every accepted stone reserves its true footprint in
@@ -1503,6 +1514,7 @@ export function buildStreambed(world) {
   const repairR = seededRandom(98617);
   const repairAttempts = 11500;
   for (let attempt = 0; attempt < repairAttempts; attempt++) {
+    if (attempt > 0 && attempt % 4096 === 0) await checkpoint(.59+.02*attempt/repairAttempts,'Fitting coarse gap stones',attempt,repairAttempts);
     const zEff = -15.6 + repairR() * 29.0;
     const hw = creekWidth(zEff) * 0.5;
     const cx = channelX(zEff);
@@ -1543,6 +1555,7 @@ export function buildStreambed(world) {
     });
   }
 
+  await checkpoint(.615,'Coarse gaps filled',repairAttempts,repairAttempts);
   // --- TIER 2d: strict residual medium/coarse coverage repair ---
   // The visible bed still had broad substrate lanes even though the fine classes
   // were numerous. Fill those voids with hand-sized stones first. New floor
@@ -1556,6 +1569,7 @@ export function buildStreambed(world) {
   let coverageMediumCount = 0;
   let coverageStackedCount = 0;
   for (let attempt = 0; attempt < coverageAttempts && coverageMediumCount < coverageTarget; attempt++) {
+    if (attempt > 0 && attempt % 4096 === 0) await checkpoint(.615+.015*attempt/coverageAttempts,'Checking remaining bed coverage',attempt,coverageAttempts);
     const zEff = -15.5 + coverageR() * 29.0;
     const hw = creekWidth(zEff) * 0.5;
     const cx = channelX(zEff);
@@ -1663,6 +1677,7 @@ export function buildStreambed(world) {
     if (isStacked) coverageStackedCount++;
   }
 
+  await checkpoint(.64,'Bed coverage checked',coverageMediumCount,coverageTarget);
   // --- TIER 2e: collision-safe irregular water-edge repair ---
   // Walk both banks in short, jittered longitudinal intervals and only add a
   // stone when the nominal lip is not already covered. The lateral center meanders
@@ -1772,6 +1787,7 @@ export function buildStreambed(world) {
     }
   }
 
+  await checkpoint(.66,'Shaping irregular creek edges');
   // --- TIER 2f: small irregular lip-gap repair ---
   // Medium edge stones above establish the broken shoreline silhouette, but a
   // hand-sized clast can still leave a visible water sliver on either side. Fill
@@ -1851,6 +1867,7 @@ export function buildStreambed(world) {
     }
   }
 
+  await checkpoint(.68,'Creek edges packed');
   // --- TIER 3: residual-void pebbles & shingle (roughly 3cm - 6.5cm) ---
   // Stable random sampling replaces the former fixed-z pebble rows and authored
   // near-bank bar. Metre-scale facies fields vary density, while the spatial
@@ -1860,6 +1877,7 @@ export function buildStreambed(world) {
   const shingleTarget = 1325;
   const pebbleAttempts = 69000;
   for (let attempt = 0; attempt < pebbleAttempts; attempt++) {
+    if (attempt > 0 && attempt % 4096 === 0) await checkpoint(.68+.04*attempt/pebbleAttempts,'Filling residual pebble gaps',attempt,pebbleAttempts);
     if (pebblePlacements.length >= pebbleTarget && shinglePlacements.length >= shingleTarget) break;
 
     const zEff = -16.0 + pr() * 30.0;
@@ -1928,6 +1946,7 @@ export function buildStreambed(world) {
     else pebblePlacements.push(item);
   }
 
+  await checkpoint(.725,'Pebble layer packed',pebblePlacements.length+shinglePlacements.length,pebbleTarget+shingleTarget);
   // --- TIER 4: residual pea gravel (roughly 1.2cm - 2.8cm) ---
   // These particles occupy the leftover gaps in clustered facies. They do not
   // trace the channel edge or form a repeating longitudinal cadence.
@@ -1935,6 +1954,7 @@ export function buildStreambed(world) {
   const gravelTarget = 2850;
   const gravelAttempts = 34000;
   for (let attempt = 0; attempt < gravelAttempts && gravelPlacements.length < gravelTarget; attempt++) {
+    if (attempt > 0 && attempt % 4096 === 0) await checkpoint(.725+.025*attempt/gravelAttempts,'Settling fine gravel',attempt,gravelAttempts);
     const zEff = -15.5 + gravelR() * 29.0;
     const hw = creekWidth(zEff) * 0.5;
     const cx = channelX(zEff);
@@ -1973,11 +1993,13 @@ export function buildStreambed(world) {
     });
   }
 
+  await checkpoint(.752,'Fine gravel settled',gravelPlacements.length,gravelTarget);
   // --- TIER 5: sparse visible fines / grit (sub-3cm matrix) ---
   const gritR = seededRandom(65129);
   const gritTarget = 1650;
   const gritAttempts = 22500;
   for (let attempt = 0; attempt < gritAttempts && gritPlacements.length < gritTarget; attempt++) {
+    if (attempt > 0 && attempt % 4096 === 0) await checkpoint(.752+.018*attempt/gritAttempts,'Adding visible mineral grit',attempt,gritAttempts);
     const zEff = -10.0 + gritR() * 20.0;
     const hw = creekWidth(zEff) * 0.5;
     const cx = channelX(zEff);
@@ -2067,13 +2089,14 @@ export function buildStreambed(world) {
     detachAnchorPlacement(16)
   ].filter(Boolean);
 
+  await checkpoint(.775,'Stone placement complete',gritPlacements.length,gritTarget);
   // Batch into InstancedMesh
   const dummy = new T.Object3D();
   function instantiateBatch(geometry, material, placements, name, shadow = false) {
     if (!placements.length) return null;
     const inst = new T.InstancedMesh(geometry, material, placements.length);
     inst.name = name;
-    inst.castShadow = shadow;
+    inst.castShadow = shadow && (world.profile?.stoneShadows ?? true);
     inst.receiveShadow = true;
 
     if (material.uViewRotation) {
@@ -2112,7 +2135,7 @@ export function buildStreambed(world) {
   // shader with a plain MeshStandardMaterial even after receiving full-res
   // scan geometry. Route them through the ritual-quality streambed PBR path.
   const heroAnchorMaterials = [0, 1].map(i => {
-    const material = createStreambedMaterial('refill-hero-anchor-' + (i + 1), {
+    const material = createStreambedMaterial(world, 'refill-hero-anchor-' + (i + 1), {
       baseRoughness: 0.86,
       sFreq: 16.0,
       materialClass: 0,
@@ -2233,6 +2256,7 @@ export function buildStreambed(world) {
     }
   };
 
+  await checkpoint(.79,'Stream stone batches ready',world.streambed.counts.total,world.streambed.counts.total);
   return world.streambed;
 }
 

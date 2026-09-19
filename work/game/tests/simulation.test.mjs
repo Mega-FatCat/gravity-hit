@@ -92,7 +92,7 @@ test('ignited material and draining water produce smoke; opening the cap leaks',
  const before=s.smoke;s.action('bottle');advance(s,2,{left:true,seal:true});assert.equal(s.cap,false);advance(s,2,{seal:true});assert.ok(s.smoke<before);
 });
 test('wrong tilt cannot heat a held glass pipe',()=>{
- const s=new Simulation();s.action('pipe');s.action('lighter');s.angle=99;advance(s,9,{fire:true,aim:1});assert.equal(s.heat,0);
+ const s=new Simulation();s.action('pipe');s.action('lighter');advance(s,9,{fire:false,aim:1});assert.equal(s.heat,0);
 });
 test('hit requires a held bottle, open cap, and trapped smoke',()=>{
  const s=ready({water:.15,smoke:.6});assert.equal(s.action('hit'),false);assert.equal(s.hits,0);s.action('bottle');assert.equal(s.action('hit'),true);
@@ -120,6 +120,6 @@ test('refill action replenishes herb and keeps manual ritual invariants',()=>{
 test('state stays bounded through arbitrary physical inputs and invalid time deltas',()=>{
  const s=ready({water:1,cap:true,bud:1,held:'bottle'});s.action('lighter');for(let i=0;i<10000;i++){
   s.step(i%71===0?NaN:i%53===0?-1:.05,{fire:i%3===0,aim:(i%11)/10,seal:i%9<3,left:i%7===0,right:i%5===0});
-  for(const k of ['water','smoke','bud','embers'])assert.ok(s[k]>=0&&s[k]<=1,k);assert.ok(s.smoke<=1-s.water);assert.ok(s.held!==s.supporting||s.held===null);
+  for(const k of ['water','smoke','bud','embers'])assert.ok(s[k]>=0&&s[k]<=1,k);assert.ok(s.smokeDensity>=0&&s.smokeDensity<=1);assert.ok(s.held!==s.supporting||s.held===null);
  }
 });

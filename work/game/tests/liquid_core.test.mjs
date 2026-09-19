@@ -30,6 +30,7 @@ test('liquid_core: levels, rotations, general plane transform, decay, reset, dry
   for(let i=0;i<fps*4;i++){v.update(1/fps,.5,id,i<fps?1.5:0,0);max=Math.max(max,v.sx);}
   assert(Math.abs(v.sx)<1e-5);final.push(v.sx);peak.push(max);
  }
+ assert.ok(Math.max(...peak)<.14,'held-water response should stay within a believable free-surface tilt');
  assert(Math.max(...final)-Math.min(...final)<1e-6);
  assert(Math.max(...peak)-Math.min(...peak)<.001);
  s.reset();s.update(0,.5,id);assert.equal(outletHead(s,[0,.1,0]),0);

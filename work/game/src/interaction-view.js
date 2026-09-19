@@ -89,7 +89,7 @@ export function prepareInteractionFrame(world,dt,sim,input,settings){
  }
  world.scene.updateMatrixWorld(true);
  world.aimScreen=world.screen(world.target);
- const anchors={bottle:v(0,.226,0),pipe:v(0,.045,0),lighter:world.nozzle||v(0,.08,0),bag:v(0,.14,0)};
+ const anchors={bottle:v(0,.226,0),pipe:v(0,.045+0.016,0),lighter:world.nozzle||v(0,.08,0),bag:v(0,.14,0)};
  for(const [id,object]of Object.entries(world.items))world.projected[id]=world.screen(object.localToWorld(anchors[id].clone()));
  world.projected.stream=world.screen(v(world.streamX(.75),-.06,.75));
 }

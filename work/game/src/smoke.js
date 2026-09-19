@@ -7,6 +7,7 @@ export function smokeVolume(){
    uLightDir:{value:new T.Vector3(0.35,0.78,-0.45).normalize()},
    uTime:{value:0},
    uDensity:{value:0},
+   uLoad:{value:0},
    uWater:{value:.03},
    uWaterPlane:{value:new T.Vector4(0,1,0,-.03)}
   },
@@ -21,7 +22,7 @@ export function smokeVolume(){
    precision highp float;
    varying vec3 vP;
    uniform vec3 uCam,uLightDir;
-   uniform float uTime,uDensity,uWater;
+   uniform float uTime,uDensity,uLoad,uWater;
    uniform vec4 uWaterPlane;
 
    float hash(vec3 p){
@@ -38,7 +39,8 @@ export function smokeVolume(){
     float v=0.52*noise(p);
     v+=0.26*noise(p*2.03+vec3(0.0,uTime*0.04,0.0));
     v+=0.13*noise(p*4.07-vec3(uTime*0.02,0.0,uTime*0.03));
-    return v*1.1;
+    v+=0.065*noise(p*8.13+vec3(uTime*0.015,0.0,-uTime*0.018));
+    return v*1.035;
    }
 
    void main(){
@@ -55,21 +57,21 @@ export function smokeVolume(){
     if(tEnd<=tStart)discard;
 
     float stepSize=(tEnd-tStart)/28.;
-    vec3 pOffset=vec3(uTime*0.025,-uTime*0.055,sin(uTime*0.12)*0.02);
+    vec3 pOffset=vec3(uTime*0.018,-uTime*0.035,sin(uTime*0.12)*0.018);
     vec3 lightDir=normalize(length(uLightDir)>0.01?uLightDir:vec3(0.35,0.78,-0.45));
 
-    // Refined extinction progression:
-    // ~25% smoke: clearly readable, graceful curling tendrils (core alpha ~0.38)
-    // ~50% smoke: rolling milky cloud with clear 3D volume (core alpha ~0.65)
-    // ~75% smoke: rich, dense, authentic gravity hit chamber (core alpha ~0.82)
-    // ~95% smoke: fully charged thick smoke with rich light/shadow contours (core alpha ~0.93)
-    float extinctionScale=uDensity*mix(95.0,165.0,uDensity);
+    // Smoke load controls how many billows exist; concentration controls how
+    // optically dense those billows are inside the currently available air.
+    // Keeping those concepts separate makes early wisps grow smoothly while
+    // still allowing 50% of a charge to compress into 25% headspace.
+    float load=smoothstep(0.0,1.0,uLoad);
+    float extinctionScale=uDensity*mix(38.0,108.0,sqrt(uDensity));
 
-    // Natural herbal smoke palette: soft organic cream body, amber warmth, cool ambient shadow
-    vec3 sunHighlight = vec3(0.94, 0.92, 0.88);
-    vec3 smokeCream   = vec3(0.81, 0.80, 0.76);
-    vec3 smokeAmber   = vec3(0.87, 0.83, 0.74);
-    vec3 shadowForest = vec3(0.44, 0.48, 0.45);
+    // Natural herbal smoke: warm lit curls, neutral body, cool forest shadow.
+    vec3 sunHighlight = vec3(0.93, 0.91, 0.86);
+    vec3 smokeCream   = vec3(0.73, 0.74, 0.70);
+    vec3 smokeAmber   = vec3(0.82, 0.78, 0.67);
+    vec3 shadowForest = vec3(0.29, 0.34, 0.32);
 
     vec3 accumCol=vec3(0.);
     float accumAlpha=0.;
@@ -88,17 +90,18 @@ export function smokeVolume(){
      float wallFade=smoothstep(0.001,0.006,wallDist);
      if(wallFade<=0.001)continue;
 
-     // Large-scale vortex domain warp creates rolling fluid plumes rather than static noise
+     // Two-scale domain warp creates connected rolling plumes and fine curls.
      vec3 warp=vec3(
-      noise(p*14.0+vec3(0.0,uTime*0.03,0.0)),
-      noise(p*14.0+vec3(4.3,-uTime*0.04,1.7)),
-      noise(p*14.0+vec3(1.2,0.8,uTime*0.025))
+      noise(p*12.0+vec3(0.0,uTime*0.025,0.0)),
+      noise(p*12.0+vec3(4.3,-uTime*0.032,1.7)),
+      noise(p*12.0+vec3(1.2,0.8,uTime*0.020))
      );
-     float n=fbm(p*26.0+(warp-0.5)*0.62+pOffset);
+     float n=fbm(p*24.0+(warp-0.5)*0.72+pOffset);
+     float curl=noise(p*58.0+(warp.yzx-0.5)*.55-pOffset*.7);
 
-     // Dynamic density shaping preserving billow valleys and swirl contours
-     float threshold=mix(0.34,0.13,uDensity);
-     float density=smoothstep(threshold,0.85,n)*wallFade*aboveWater;
+     // Sparse tendrils at first, then connected billows as the bowl burns.
+     float threshold=mix(0.57,0.20,sqrt(load));
+     float density=smoothstep(threshold,0.88,n*.84+curl*.16)*wallFade*aboveWater;
 
      if(density>0.003){
       // Directional light sample towards the sun: detects billow crests vs shadowed crevices
@@ -107,28 +110,29 @@ export function smokeVolume(){
       float wallFadeL=smoothstep(0.001,0.006,radL-length(pLight.xz));
       float aboveWaterL=smoothstep(0.001,0.005,dot(uWaterPlane,vec4(pLight,1.)));
       vec3 warpL=vec3(
-       noise(pLight*14.0+vec3(0.0,uTime*0.03,0.0)),
-       noise(pLight*14.0+vec3(4.3,-uTime*0.04,1.7)),
-       noise(pLight*14.0+vec3(1.2,0.8,uTime*0.025))
+       noise(pLight*12.0+vec3(0.0,uTime*0.025,0.0)),
+       noise(pLight*12.0+vec3(4.3,-uTime*0.032,1.7)),
+       noise(pLight*12.0+vec3(1.2,0.8,uTime*0.020))
       );
-      float nL=fbm(pLight*26.0+(warpL-0.5)*0.62+pOffset);
-      float densityL=smoothstep(threshold,0.85,nL)*wallFadeL*aboveWaterL;
+      float nL=fbm(pLight*24.0+(warpL-0.5)*0.72+pOffset);
+      float curlL=noise(pLight*58.0+(warpL.yzx-0.5)*.55-pOffset*.7);
+      float densityL=smoothstep(threshold,0.88,nL*.84+curlL*.16)*wallFadeL*aboveWaterL;
 
       // Lighting contrast: sunlit face is brightened; shadowed face receives forest ambient
-      float lightDiff=clamp((densityL-density)*3.0,-0.6,1.0);
-      float directLight=clamp(0.55-0.45*lightDiff,0.18,1.0);
+      float lightDiff=clamp((densityL-density)*3.4,-0.7,1.0);
+      float directLight=clamp(0.58-0.46*lightDiff,0.16,1.0);
 
       // Phase function: forward scattering creates gentle rim translucency
       float cosTheta=dot(d,lightDir);
-      float phase=0.5+0.5*(1.0+0.30*cosTheta);
+      float phase=.72+.28*(.5+.5*cosTheta);
 
       // Subtle warm amber core in denser upper regions
       float heightFrac=clamp((p.y-0.03)*4.2,0.0,1.0);
       vec3 coreCol=mix(smokeCream,smokeAmber,heightFrac*0.35);
 
       // Final volumetric shaded color: 3D billow relief eliminates flat white/milky blob
-      vec3 litCol=mix(coreCol,sunHighlight,directLight*phase*0.35);
-      vec3 stepCol=mix(shadowForest,litCol,directLight*0.75+0.25);
+      vec3 litCol=mix(coreCol,sunHighlight,directLight*phase*.32);
+      vec3 stepCol=mix(shadowForest,litCol,directLight*.78+.18);
 
       float stepExtinction=density*extinctionScale;
       float stepAlpha=1.0-exp(-stepExtinction*stepSize);
@@ -136,7 +140,7 @@ export function smokeVolume(){
       accumCol+=(1.0-accumAlpha)*stepAlpha*stepCol;
       accumAlpha+=(1.0-accumAlpha)*stepAlpha;
 
-      if(accumAlpha>0.985)break;
+      if(accumAlpha>0.965)break;
      }
     }
 

@@ -23,7 +23,7 @@ function assertInvariants(s, msg = '') {
   s.assert();
   assert.ok(s.water >= 0 && s.water <= 1, `${msg}: water out of bounds: ${s.water}`);
   assert.ok(s.smoke >= 0 && s.smoke <= 1, `${msg}: smoke out of bounds: ${s.smoke}`);
-  assert.ok(s.smoke <= 1 - s.water + 1e-6, `${msg}: smoke (${s.smoke}) exceeds available air (${1 - s.water})`);
+  assert.ok(s.smokeDensity >= 0 && s.smokeDensity <= 1, `${msg}: visual smoke density out of bounds: ${s.smokeDensity}`);
   assert.ok(s.bud >= 0 && s.bud <= 1, `${msg}: bud out of bounds: ${s.bud}`);
   assert.ok(s.embers >= 0 && s.embers <= 1, `${msg}: embers out of bounds: ${s.embers}`);
   assert.ok(s.stock >= 0, `${msg}: stock negative: ${s.stock}`);

@@ -14,10 +14,12 @@ export class BottleSurface {
   if(m.length!==16||!Number.isFinite(ax)||!Number.isFinite(az))throw Error('Invalid transform/acceleration');
   if(dt>.12){this.reset();dt=0;}
   dt=Math.min(dt,.05);amount=clamp(amount);
-  const k=70,c=10;let remaining=dt;
+  // A strongly damped response keeps the free surface physical without the
+  // large overshoot that used to make held/pouring water whip around.
+  const k=52,c=14.5;let remaining=dt;
   while(remaining>1e-9){
    const h=Math.min(remaining,1/120);remaining-=h;
-   const tx=clamp(ax/9.81,-.18,.18),tz=clamp(az/9.81,-.18,.18);
+   const tx=clamp(ax/9.81,-.12,.12),tz=clamp(az/9.81,-.12,.12);
    this.vx+=(k*(tx-this.sx)-c*this.vx)*h;
    this.vz+=(k*(tz-this.sz)-c*this.vz)*h;
    this.sx+=this.vx*h;this.sz+=this.vz*h;

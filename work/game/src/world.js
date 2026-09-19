@@ -16,6 +16,8 @@ import {prepareInteractionFrame} from './interaction-view.js';
 import {resolveLogicalHit,visibleSurface} from './picking.js';
 import {FinalEdgePass} from './final-edge-pass.js';
 import {Atmosphere} from './atmosphere.js';
+import {getProfile} from './quality-profiles.js';
+import {resolveQuality} from './quality-selection.js';
 
 const V=(x=0,y=0,z=0)=>new T.Vector3(x,y,z);
 const mat=(color,roughness=.7,extra={})=>new T.MeshStandardMaterial({color,roughness,...extra});
@@ -62,8 +64,9 @@ const inPropClearance=(x,z,isLarge=false,sx=null,sw=null)=>{
 };
 
 export class World {
- constructor(canvas,onProgress){
-  this.renderer=new T.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance',preserveDrawingBuffer:true});
+ constructor(canvas,onProgress,quality='auto',options={}){
+  this.downloadProgress=options.downloadProgress??null;
+  this.renderer=new T.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
   this.renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.5));this.renderer.setSize(innerWidth,innerHeight);
   this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=T.PCFSoftShadowMap;
   this.renderer.localClippingEnabled=true;
@@ -73,21 +76,79 @@ export class World {
   this.camera=new T.PerspectiveCamera(53,innerWidth/innerHeight,.025,150);this.camera.position.set(0,.98,2.65);this.camera.lookAt(0,.32,.3);
   this.baseCam=this.camera.position.clone();this.yaw=0;this.pitch=-.265;this.wind=0.5;this.weather='clear';this.time=0;this.windMats=[];this.sway=[];this.items={};this.interactive=[];this.pointer=new T.Vector2();this.raycaster=new T.Raycaster();this.target=V();this.projected={};
   this.sun=new T.DirectionalLight('#fff2d8',1.5);this.sun.position.set(16,36,-18);this.sun.castShadow=true;this.sun.shadow.mapSize.set(4096,4096);Object.assign(this.sun.shadow.camera,{left:-60,right:60,top:60,bottom:-60,near:1,far:140});this.sun.shadow.normalBias=.025;this.sun.shadow.bias=-.0001;this.scene.add(this.sun);this.scene.add(this.sun.target);
-  this.scene.add(new T.HemisphereLight('#8ea89a','#242c1c',0.85));
-  this.atmosphere=new Atmosphere(this);
-  this.makeGround();this.makeObjects();this.makeParticles();
-  this.ready=this.loadAssets(onProgress);
+   this.scene.add(new T.HemisphereLight('#8ea89a','#242c1c',0.85));
+   this.atmosphere=new Atmosphere(this);
+   // Resolve Automatic from the already-created WebGL context before any
+   // procedural content or large file request is started.
+   this.setQuality(quality);
+  this._onProgress=onProgress;
+  if(!options.deferInitialize)this.start();
+ }
+ start(){
+  if(!this.ready)this.ready=this.initialize(this._onProgress);
+  return this.ready;
  }
  groundBase(x,z){return forestBase(x,z);}
  ground(x,z){return forestHeight(x,z);}
+ async loadingCheckpoint(task,progress,label,detail='',completed=0,total=0){
+  this._onProgress?.({task,progress,label,detail,completed,total});
+  await new Promise(resolve=>requestAnimationFrame(resolve));
+ }
+ loadingJob(detail,work){
+  this._loadingWorkQueue??=Promise.resolve();this._loadingJobsCompleted??=0;this._loadingJobsTotal??=40;
+  // The two canopy passes account for most of the real CPU work. Treating each
+  // queued item as equal made the bar sit on one percentage while millions of
+  // leaves were generated, then race through many tiny jobs at the end.
+  const weight=detail==='Distant pine forest'?10:detail==='Mature pine forest'?8:detail==='Near shrubs'?2:1;
+  const run=this._loadingWorkQueue.then(async()=>{
+   const before=this._loadingJobsCompleted;this._loadingJobWeight=weight;
+   await this.loadingCheckpoint('scene',Math.min(.94,.02+.92*before/this._loadingJobsTotal),'Building forest detail',detail,Math.round(before),this._loadingJobsTotal);
+   const result=await work();this._loadingJobsCompleted+=weight;
+   await this.loadingCheckpoint('scene',Math.min(.96,.02+.92*this._loadingJobsCompleted/this._loadingJobsTotal),'Building forest detail',`${detail} ready`,Math.round(this._loadingJobsCompleted),this._loadingJobsTotal);
+   return result;
+  });
+  this._loadingWorkQueue=run.catch(()=>{});
+  return run;
+ }
+ async initialize(onProgress){
+  this._onProgress=onProgress;
+  const report=(task,progress,label,completed=0,total=0,detail='')=>onProgress?.({task,progress,label,completed,total,detail});
+  const yieldFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
+  report('renderer',1,`Graphics preset: ${this.profile.label}`,1,1,this.qualityDecision.caps.gpu);
+  await yieldFrame();
+  report('terrain',.02,'Shaping the clearing',0,3,'Terrain and stream banks');
+  await this.makeGround();
+  report('terrain',.86,'Stream and terrain ready',1,3,'Water, stones and forest floor');
+  await yieldFrame();
+  this.makeObjects();
+  report('terrain',.78,'Placing ritual objects',2,3,'Bottle, pipe, lighter and bag');
+  await yieldFrame();
+  this.makeParticles();
+  report('terrain',1,'Clearing prepared',3,3,'Starting preset-specific assets');
+  await yieldFrame();
+  return this.loadAssets(onProgress);
+ }
  async loadAssets(onProgress){
-  const manager=new T.LoadingManager();manager.onProgress=(_,n,total)=>onProgress?.(n/total);const tl=new T.TextureLoader(manager);const gl=new GLTFLoader(manager);
-  const texture=async(path,srgb=false,repeat=1)=>{const t=await tl.loadAsync(`./assets/${path}`);t.colorSpace=srgb?T.SRGBColorSpace:T.NoColorSpace;t.wrapS=t.wrapT=T.RepeatWrapping;t.repeat.set(repeat,repeat);t.anisotropy=8;return t;};
+  const report=(task,progress,label,completed=0,total=0,detail='')=>onProgress?.({task,progress,label,completed,total,detail});
+  const yieldFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
+  const describe=url=>decodeURIComponent(String(url).split('/').at(-1)?.replace(/[_-]/g,' ').replace(/\.(gltf|glb|png|jpe?g|hdr)$/i,'')||'asset');
+  const manager=new T.LoadingManager();
+  manager.setURLModifier(url=>{this.downloadProgress?.plan(url);return url;});
+  manager.onProgress=(url,n,total)=>{this.downloadProgress?.complete(url);report('assets',total?n/total:0,'Loading preset assets',n,total,describe(url));};
+  const tl=new T.TextureLoader(manager),rawGl=new GLTFLoader(manager),modelCache=new Map(),textureCache=new Map();
+  const loadModel=path=>{if(!modelCache.has(path))modelCache.set(path,rawGl.loadAsync(path));return modelCache.get(path);};
+  const gl={loadAsync:loadModel};
+  const texture=async(path,srgb=false,repeat=1)=>{
+   const key=`${path}|${srgb?'srgb':'linear'}|${repeat}`;
+   if(!textureCache.has(key))textureCache.set(key,(async()=>{const t=await tl.loadAsync(`./assets/${path}`);t.colorSpace=srgb?T.SRGBColorSpace:T.NoColorSpace;t.wrapS=t.wrapT=T.RepeatWrapping;t.repeat.set(repeat,repeat);t.anisotropy=this.profile.anisotropy;return t;})());
+   return textureCache.get(key);
+  };
+  const tier=this.profile.textureTier;
   this.pineBarkReady=(async()=>{
    const [map,normalMap,roughnessMap]=await Promise.all([
-    texture('pine_bark_4k/pine_bark_diff_4k.jpg',true,1),
-    texture('pine_bark_4k/pine_bark_nor_gl_4k.jpg',false,1),
-    texture('pine_bark_4k/pine_bark_rough_4k.jpg',false,1)
+    texture(`pine_bark_4k/pine_bark_diff_${tier}.jpg`,true,1),
+    texture(`pine_bark_4k/pine_bark_nor_gl_${tier}.jpg`,false,1),
+    texture(`pine_bark_4k/pine_bark_rough_${tier}.jpg`,false,1)
    ]);
    map.wrapS=map.wrapT=T.RepeatWrapping;
    normalMap.wrapS=normalMap.wrapT=T.RepeatWrapping;
@@ -95,32 +156,36 @@ export class World {
    map.repeat.set(1.0,1.0);
    normalMap.repeat.set(1.0,1.0);
    roughnessMap.repeat.set(1.0,1.0);
-   map.anisotropy=16;normalMap.anisotropy=16;roughnessMap.anisotropy=16;
+    map.anisotropy=this.profile.anisotropy;normalMap.anisotropy=this.profile.anisotropy;roughnessMap.anisotropy=this.profile.anisotropy;
    this.pineBarkPbr={map,normalMap,roughnessMap};
    return this.pineBarkPbr;
   })();
-  this.treeLeafReady=gl.loadAsync('./assets/shrub_01/shrub_01.gltf');
+  this.treeLeafReady=loadModel('./assets/shrub_01/shrub_01.gltf');
   const tasks=[loadForestDetails(this,gl,texture),
-   (async()=>{const model=await gl.loadAsync('./assets/clipper.glb');this.upgradeLighter(model.scene);})(),
-   (async()=>{const model=await gl.loadAsync('./assets/bottle.glb');this.upgradeBottle(model.scene);})(),
-   (async()=>{const model=await gl.loadAsync('./assets/pipe.glb');this.upgradePipe(model.scene);})(),
+   (async()=>{const model=await loadModel('./assets/clipper.glb');await this.loadingJob('Lighter materials',()=>this.upgradeLighter(model.scene));})(),
    (async()=>{try{const[bH,pH,scH,bgH,pcH,cavH,contract]=await Promise.all([gl.loadAsync('./assets/props-hero/bottle_hero.glb'),gl.loadAsync('./assets/props-hero/pipe_hero.glb'),gl.loadAsync('./assets/props-hero/cap_spare.glb'),gl.loadAsync('./assets/props-hero/bag_hero.glb'),gl.loadAsync('./assets/props-hero/packed_charge.glb'),gl.loadAsync('./assets/props-hero/bottle_cavity.glb'),fetch('./assets/props-hero/prop_contract.json').then(r=>r.json()).catch(()=>null)]);this.heroModels={bottle:bH.scene,pipe:pH.scene,spareCap:scH.scene,bag:bgH.scene,packedCharge:pcH.scene,bottleCavity:cavH.scene};this.heroContract=contract;if(contract?.samples&&this.liquid?.setSamples)this.liquid.setSamples(contract.samples);}catch(e){console.warn('Hero props GLB load failed:',e.message);}})(),
-   (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/rock_moss_set_01/rock_moss_set_01.gltf'),gl.loadAsync('./assets/creek_rocks_lod.glb')]);this.upgradeRocks(model.scene,lod.scene);})(),
-   (async()=>{const env=await new RGBELoader(manager).loadAsync('./assets/forest.hdr');env.mapping=T.EquirectangularReflectionMapping;this.env=env;this.scene.environment=env;this.scene.background=null;this.scene.environmentIntensity=.62;this.scene.backgroundIntensity=.62;this.scene.backgroundRotation.y=1.7;this.scene.environmentRotation.y=1.7;this.scene.backgroundBlurriness=0;})(),
-   (async()=>{const [map,normalMap]=await Promise.all([texture('rock_boulder_dry/diff.jpg',true,2.5),texture('rock_boulder_dry/nor_gl.jpg',false,2.5)]);Object.assign(this.rockMat,{map,normalMap});this.rockMat.normalScale.set(.75,.75);this.rockMat.needsUpdate=true;})(),
+   (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/rock_moss_set_01/rock_moss_set_01.gltf'),gl.loadAsync('./assets/creek_rocks_lod.glb')]);await this.loadingJob('Photogrammetry creek rocks',()=>this.upgradeRocks(model.scene,lod.scene));})(),
+   (async()=>{let env;if(this.profile.loadHDR)env=await new RGBELoader(manager).loadAsync('./assets/forest.hdr');else{env=new T.DataTexture(new Uint8Array([54,75,55,255,124,143,117,255]),2,1,T.RGBAFormat);env.colorSpace=T.SRGBColorSpace;env.needsUpdate=true;}env.mapping=T.EquirectangularReflectionMapping;this.env=env;this.scene.environment=env;this.scene.background=this.profile.loadHDR?null:new T.Color('#1a241b');this.scene.environmentIntensity=.62;if(this.profile.loadHDR){this.scene.backgroundIntensity=.62;this.scene.backgroundRotation.y=1.7;this.scene.environmentRotation.y=1.7;this.scene.backgroundBlurriness=0;}})(),
+   (async()=>{const [map,normalMap]=await Promise.all([texture(`rock_boulder_dry/diff_${tier}.jpg`,true,2.5),texture(`rock_boulder_dry/nor_gl_${tier}.jpg`,false,2.5)]);Object.assign(this.rockMat,{map,normalMap});this.rockMat.normalScale.set(.75,.75);this.rockMat.needsUpdate=true;})(),
    (async()=>{const [map,normalMap]=await Promise.all([texture('bark_brown_02/diff.jpg',true,3),texture('bark_brown_02/nor_gl.jpg',false,3)]);Object.assign(this.barkMat,{map,normalMap});this.barkMat.needsUpdate=true;})(),
-   (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/fern_02/fern_02.gltf'),gl.loadAsync('./assets/fern_02_lod.glb')]);plantFerns(this,model.scene,lod.scene);})(),
-   (async()=>{const [model,lod,broadleaf,broadleafLod,solidBroadleaf,shrub02,shrub02Lod]=await Promise.all([gl.loadAsync('./assets/shrub_04/shrub_04.gltf'),gl.loadAsync('./assets/shrub_04_lod.glb'),gl.loadAsync('./assets/shrub_03/shrub_03.gltf'),gl.loadAsync('./assets/shrub_03_lod.glb'),this.treeLeafReady,gl.loadAsync('./assets/shrub_02/shrub_02.gltf'),gl.loadAsync('./assets/shrub_02_lod.glb')]);this.makeShrubs(model.scene,lod.scene,broadleaf.scene,broadleafLod.scene,solidBroadleaf.scene,shrub02.scene,shrub02Lod.scene);})(),
-   (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/grass_clumps_lod.glb'),gl.loadAsync('./assets/grass_far_lod.glb')]);plantGrass(this,model.scene,lod.scene);})(),
-   (async()=>{try{const [model,leafAsset]=await Promise.all([gl.loadAsync('./assets/pine.glb'),this.treeLeafReady,this.pineBarkReady,...this.foliageAlphaReady]);this.makePines(model.scene,leafAsset.scene);}catch(e){console.warn('Pine LOD unavailable',e.message);}})()
-  ];const result=await Promise.allSettled(tasks);this.assetErrors=result.filter(r=>r.status==='rejected').map(r=>String(r.reason));if(this.assetErrors.length)console.error(this.assetErrors);upgradeHeroProps(this);this.renderer.compile(this.scene,this.camera);this._shadowState=null;this.renderer.shadowMap.needsUpdate=true;return this;
+   (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/fern_02/fern_02.gltf'),gl.loadAsync('./assets/fern_02_lod.glb')]);await this.loadingJob('Ferns',()=>plantFerns(this,model.scene,lod.scene));})(),
+   (async()=>{const [model,lod,broadleaf,broadleafLod,solidBroadleaf,shrub02,shrub02Lod]=await Promise.all([gl.loadAsync('./assets/shrub_04/shrub_04.gltf'),gl.loadAsync('./assets/shrub_04_lod.glb'),gl.loadAsync('./assets/shrub_03/shrub_03.gltf'),gl.loadAsync('./assets/shrub_03_lod.glb'),this.treeLeafReady,gl.loadAsync('./assets/shrub_02/shrub_02.gltf'),gl.loadAsync('./assets/shrub_02_lod.glb')]);await this.loadingJob('Near shrubs',()=>this.makeShrubs(model.scene,lod.scene,broadleaf.scene,broadleafLod.scene,solidBroadleaf.scene,shrub02.scene,shrub02Lod.scene));})(),
+   (async()=>{const [model,lod]=await Promise.all([gl.loadAsync('./assets/grass_clumps_lod.glb'),gl.loadAsync('./assets/grass_far_lod.glb')]);await this.loadingJob('Forest grass',()=>plantGrass(this,model.scene,lod.scene));})(),
+   (async()=>{try{const [model,leafAsset]=await Promise.all([gl.loadAsync('./assets/pine.glb'),this.treeLeafReady,this.pineBarkReady,...this.foliageAlphaReady]);await this.loadingJob('Mature pine forest',()=>this.makePines(model.scene,leafAsset.scene));}catch(e){console.warn('Pine LOD unavailable',e.message);}})()
+  ];
+  report('scene',0,'Assembling the forest',0,this._loadingJobsTotal,'Waiting for preset assets');
+  const result=await Promise.allSettled(tasks);this.assetErrors=result.filter(r=>r.status==='rejected').map(r=>String(r.reason));if(this.assetErrors.length)console.error(this.assetErrors);
+  report('scene',1,'Forest assembled',this._loadingJobsTotal,this._loadingJobsTotal,'All preset-specific forest work is ready');
+  report('props',.25,'Finishing ritual objects',0,1,'Replacing loading stand-ins');await yieldFrame();upgradeHeroProps(this);report('props',1,'Ritual objects ready',1,1,'Physical materials and liquid volumes');
+  await yieldFrame();report('shaders',.1,'Warming graphics shaders',0,1,`${this.profile.label} preset`);if(this.renderer.compileAsync)await this.renderer.compileAsync(this.scene,this.camera);else this.renderer.compile(this.scene,this.camera);report('shaders',1,'Shaders ready',1,1,'First frame is prepared');
+  this._shadowState=null;this.renderer.shadowMap.needsUpdate=true;return this;
  }
- makeGround(){buildForestFloor(this);}
+ async makeGround(){await buildForestFloor(this);}
  streamX(z){return creekX(z);}
  streamWidth(z){return creekWidth(z);}
  addWind(material,amp=.025){material.onBeforeCompile=shader=>{shader.uniforms.uTime={value:0};shader.uniforms.uWind={value:this.wind};shader.vertexShader='uniform float uTime; uniform float uWind;\n'+shader.vertexShader;shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`#include <begin_vertex>\n float sway = sin(uTime*1.3+position.x*1.8+position.z*.9)*${amp.toFixed(4)}*uWind; transformed.x += sway*max(0.,position.y); transformed.z += sway*.4*max(0.,position.y);`);this.windMats.push(shader);};material.customProgramCacheKey=()=>`wind${amp}`;}
   makeFerns(model){plantFerns(this,model);}
- makePines(model,leafModel=null){plantPines(this,model,false,leafModel);}
+ async makePines(model,leafModel=null){await plantPines(this,model,false,leafModel);}
   makeShrubs(model,lodModel,broadleafModel=null,broadleafLod=null,solidBroadleafModel=null,shrub02Model=null,shrub02Lod=null){plantShrubs(this,model,lodModel,broadleafModel,broadleafLod,solidBroadleafModel,shrub02Model,shrub02Lod);}
   makeGroundCover(model){plantGrass(this,model);}
   upgradeRocks(model,lodModel){
@@ -129,34 +194,15 @@ export class World {
    const src=sources[0];if(!src)return;const g=src.geometry.clone();g.computeBoundingBox();const bounds=g.boundingBox,size=bounds.getSize(V()),center=bounds.getCenter(V());g.translate(-center.x,-bounds.min.y,-center.z);
     const m=src.material.clone();
     m.roughness=.88;m.metalness=0.0;m.normalScale=new T.Vector2(1.15,1.15);m.color.set('#d5d4c8');m.aoMapIntensity=1.0;
-    const tl=new T.TextureLoader();
-    const loadMap=(path,srgb=false)=>{
-      const t=tl.load(path,tex=>{
-        tex.colorSpace=srgb?T.SRGBColorSpace:T.NoColorSpace;
-        tex.flipY=false;tex.anisotropy=16;tex.minFilter=T.LinearMipmapLinearFilter;tex.generateMipmaps=true;
-        m.needsUpdate=true;
-      });
-      t.colorSpace=srgb?T.SRGBColorSpace:T.NoColorSpace;t.flipY=false;t.anisotropy=16;
-      return t;
-    };
-    m.map=loadMap('./assets/rock_moss_set_01/textures/diff_4k.jpg',true);
-    m.normalMap=loadMap('./assets/rock_moss_set_01/textures/nor_gl_4k.jpg',false);
-    m.roughnessMap=loadMap('./assets/rock_moss_set_01/textures/rough_4k.jpg',false);
-    m.aoMap=loadMap('./assets/rock_moss_set_01/textures/ao_4k.jpg',false);
-
-    const loadDetail=(path,srgb=false)=>{
-      const t=tl.load(path,tex=>{
-        tex.colorSpace=srgb?T.SRGBColorSpace:T.NoColorSpace;
-        tex.wrapS=tex.wrapT=T.RepeatWrapping;tex.anisotropy=16;tex.minFilter=T.LinearMipmapLinearFilter;tex.generateMipmaps=true;
-        m.needsUpdate=true;
-      });
-      t.colorSpace=srgb?T.SRGBColorSpace:T.NoColorSpace;t.wrapS=t.wrapT=T.RepeatWrapping;t.anisotropy=16;
-      return t;
-    };
-    const uMicroDiff={value:loadDetail('./assets/rock_boulder_dry/diff_4k.jpg',true)};
-    const uMicroNormal={value:loadDetail('./assets/rock_boulder_dry/nor_gl_4k.jpg',false)};
-    const uMicroRough={value:loadDetail('./assets/rock_boulder_dry/rough_4k.jpg',false)};
-    const uMicroAO={value:loadDetail('./assets/rock_boulder_dry/ao_4k.jpg',false)};
+    // Reuse the exact GPU textures already owned by the streambed. The old
+    // path uploaded a second complete 4K rock set solely for this slab/rock
+    // material, wasting substantial VRAM without changing the image.
+    const shared=this.streambedPbr;
+    if(shared){m.map=shared.diff;m.normalMap=shared.nor;m.roughnessMap=shared.rough;m.aoMap=shared.ao;}
+    const uMicroDiff={value:shared?.microDiff??m.map};
+    const uMicroNormal={value:shared?.microNor??m.normalMap};
+    const uMicroRough={value:shared?.microRough??m.roughnessMap};
+    const uMicroAO={value:shared?.microAO??m.aoMap};
     const uViewRotation={value:new T.Matrix3()};
 
     m.onBeforeCompile=shader=>{
@@ -407,7 +453,7 @@ export class World {
       const inst=new T.InstancedMesh(geometry,material,matrices.length);inst.name=label;
       inst.onBeforeRender=(_renderer,_scene,camera)=>{uViewRotation.value.setFromMatrix4(camera.matrixWorldInverse);};
       matrices.forEach((matrix,i)=>inst.setMatrixAt(i,matrix));
-      inst.instanceMatrix.needsUpdate=true;inst.castShadow=true;inst.receiveShadow=true;this.scene.add(inst);
+       inst.instanceMatrix.needsUpdate=true;inst.castShadow=true;inst.receiveShadow=true;inst.computeBoundingBox();inst.computeBoundingSphere();this.scene.add(inst);
      };
      makeBatch(streamMatrices,false,'Scanned creek-crossing stones • full-resolution scan PBR',null,true,false);
      makeBatch(landMatrices,true,'Scanned clearing stones');
@@ -507,11 +553,11 @@ export class World {
    capmesh.name='cap';this.capmesh=capmesh;capmesh.renderOrder=4;
    const pipeProfile=[[.0052,-.018],[.0052,.052],[.0056,.058],[.0072,.070],[.0073,.076],[.0068,.0775],[.0053,.076],[.0045,.068],[.0016,.058],[.0036,.052],[.0036,-.016]];
    this.pipeMat=new T.MeshPhysicalMaterial({color:'#f6fff9',roughness:.05,transmission:.98,thickness:.0025,ior:1.474,transparent:true,opacity:.98,envMapIntensity:1.25,side:T.DoubleSide,depthWrite:false});
-   this.pipeGlass=mesh(lathe(pipeProfile,48),this.pipeMat,cap,V(0,0,0));this.pipeGlass.castShadow=false;
+   this.pipeGlass=mesh(lathe(pipeProfile,48),this.pipeMat,cap,V(0,0.016,0));this.pipeGlass.castShadow=false;
    mesh(new T.CylinderGeometry(.0074,.0074,.006,24),mat('#1a1d1e',.65),cap,V(0,.023,0));
-   this.hotTip=mesh(new T.CylinderGeometry(.0055,.0055,.012,24),new T.MeshBasicMaterial({color:'#f24f20',transparent:true,opacity:0,depthWrite:false}),cap,V(0,-.015,0));this.hotTip.castShadow=false;
-   this.budMat=createBudMaterial();this.bowlBud=mesh(createBudGeometry({seed:101,scale:0.68}),this.budMat,cap,V(0,.040,0));this.bagBudMat=createBudMaterial();
-   this.emberLight=new T.PointLight('#ff752e',0,.25,2);cap.add(this.emberLight);this.emberLight.position.set(0,.074,0);
+   this.hotTip=mesh(new T.CylinderGeometry(.0055,.0055,.012,24),new T.MeshBasicMaterial({color:'#f24f20',transparent:true,opacity:0,depthWrite:false}),cap,V(0,-.015+0.016,0));this.hotTip.castShadow=false;
+   this.budMat=createBudMaterial();this.bowlBud=mesh(createBudGeometry({seed:101,scale:0.68}),this.budMat,cap,V(0,.040+0.016,0));this.bagBudMat=createBudMaterial();
+   this.emberLight=new T.PointLight('#ff752e',0,.25,2);cap.add(this.emberLight);this.emberLight.position.set(0,.074+0.016,0);
    const lighter=new T.Group();this.scene.add(lighter);this.items.lighter=lighter;const lighterBody=mat('#111413',.31);
    mesh(new T.CylinderGeometry(.015,.015,.073,40),lighterBody,lighter,V(0,.038,0));
    const silver=new T.MeshStandardMaterial({color:'#a8adae',roughness:.23,metalness:.96});mesh(new T.CylinderGeometry(.0155,.0155,.021,32,1,true),silver,lighter,V(0,.083,0));
@@ -540,12 +586,32 @@ export class World {
    const bag=new T.Group();this.scene.add(bag);this.items.bag=bag;
    const weedBag=createWeedBag(this.bagBudMat);bag.add(weedBag.group);this.bagFilm=weedBag.film;this.bagNugs=weedBag.contents;this.bagGeos=weedBag.geometries;
    const outlet=mesh(new T.CircleGeometry(.0025,16),mat('#161b12',.8,{side:T.DoubleSide}),bottle,V(.0326,.032,0));outlet.rotation.y=Math.PI*.43;this.outlet=outlet;
-    const jetMat=new T.MeshPhysicalMaterial({color:'#e7fff9',roughness:.035,metalness:0,transmission:.55,thickness:.01,ior:1.333,transparent:true,opacity:.94,depthWrite:false,side:T.DoubleSide,envMapIntensity:1.2,clearcoat:.8,clearcoatRoughness:.025});
-    jetMat.onBeforeCompile=shader=>{shader.uniforms.uTime={value:0};this.jetShader=shader;shader.vertexShader='uniform float uTime;\n'+shader.vertexShader;shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`#include <begin_vertex>\n float swirl = sin(position.y * 180.0 - uTime * 35.0) * 0.00028;\n transformed.x += swirl;\n transformed.z += cos(position.y * 180.0 - uTime * 35.0) * 0.00028;`);};
-    this.jet=mesh(new T.CylinderGeometry(.0014,.0021,1,8),jetMat,this.scene);this.jet.castShadow=false;this.jet.renderOrder=3;
+    const jetMat=new T.MeshPhysicalMaterial({color:'#d8f6f0',roughness:.015,metalness:0,transmission:.95,thickness:.018,ior:1.333,transparent:true,opacity:.92,depthWrite:false,side:T.DoubleSide,envMapIntensity:2.6,clearcoat:1.0,clearcoatRoughness:.012});
+    jetMat.onBeforeCompile=shader=>{
+      shader.uniforms.uTime={value:0};
+      this.jetShader=shader;
+      // The CPU path already contains the physical centreline. Earlier code
+      // multiplied world-space X/Z by a taper factor, which deformed the jet
+      // around the scene origin and made it whip wildly while pouring.
+      shader.vertexShader='uniform float uTime;\nvarying vec3 vJetWorld;\n'+shader.vertexShader;
+      shader.vertexShader=shader.vertexShader.replace('#include <worldpos_vertex>',`#include <worldpos_vertex>
+        vJetWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+      `);
+      shader.fragmentShader='uniform float uTime;\nvarying vec3 vJetWorld;\n'+shader.fragmentShader;
+      shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_begin>',`#include <normal_fragment_begin>
+        float streamPhase = vJetWorld.y * 90.0 - uTime * 32.0;
+        vec3 waterPerturb = vec3(
+          sin(streamPhase + vJetWorld.x * 80.0) * 0.15,
+          cos(streamPhase * 1.3 + vJetWorld.z * 80.0) * 0.15,
+          sin(streamPhase * 0.7) * 0.10
+        );
+        normal = normalize(normal + waterPerturb);
+      `);
+    };
+     this.jet=mesh(new T.TubeGeometry(new T.LineCurve3(V(0,0,0),V(0,-.1,0)),16,.003,8,false),jetMat,this.scene);this.jet.castShadow=false;this.jet.frustumCulled=false;this.jet.renderOrder=3;
     const splashMat=new T.MeshBasicMaterial({color:'#d9fff6',transparent:true,opacity:0,depthWrite:false,side:T.DoubleSide});
     this.splashRing=mesh(new T.RingGeometry(.003,.036,32),splashMat,this.scene);this.splashRing.rotation.x=-Math.PI/2;this.splashRing.renderOrder=3;this.splashRing.visible=false;
-    const dropGeo=new T.SphereGeometry(.0012,8,6);this.jetDrops=[];for(let i=0;i<6;i++){const d=mesh(dropGeo,jetMat,this.scene);d.castShadow=false;d.visible=false;this.jetDrops.push(d);}
+    const dropGeo=new T.SphereGeometry(.0013,8,6);this.jetDrops=[];for(let i=0;i<12;i++){const d=mesh(dropGeo,jetMat,this.scene);d.castShadow=false;d.visible=false;this.jetDrops.push(d);}
    this.home={bottle:V(-.2272,.293,.7578),pipe:V(-.201,.323,.986),lighter:V(-.10,.31,.92),bag:V(.287,.32,1.084)};
    for(const [id,g]of Object.entries(this.items)){g.userData.item=id;g.position.copy(this.home[id]);g.traverse(o=>{o.userData.item=id;if(o.isMesh)this.interactive.push(o);});}this.items.bottle.rotation.set(-1.7768,.1651,.7989);this.items.bag.rotation.set(-1.453,-.0931,.9055);this.items.lighter.rotation.set(1.5708,0,0);
   }
@@ -558,16 +624,23 @@ export class World {
    const rainGeo=new T.BufferGeometry(),rp=new Float32Array(600*3);for(let i=0;i<600;i++)rp.set([rand(-8,8),rand(0,7),rand(-8,5)],i*3);rainGeo.setAttribute('position',new T.BufferAttribute(rp,3));this.rain=new T.Points(rainGeo,new T.PointsMaterial({color:'#c0d2d1',size:.023,transparent:true,opacity:.42}));this.scene.add(this.rain);this.rain.visible=false;
   }
   setQuality(value){
-   this.quality=value;
-   const dpr=Math.min(window.devicePixelRatio||1,2.0);
-   const pixel=value==='low'?Math.min(dpr,1.0):value==='medium'?Math.min(dpr,1.5):dpr;
-   this.renderer.setPixelRatio(pixel);
-   this.renderer.shadowMap.enabled=value!=='low';
-   this.renderer.shadowMap.autoUpdate=value==='high';
+   const decision=resolveQuality(value,this.renderer);
+   const profile=getProfile(decision.quality);
+   this.qualityDecision=decision;this.qualityMode=decision.mode;this.quality=decision.quality;this.profile=profile;
+   const dpr=Math.min(window.devicePixelRatio||1,profile.maxPixelRatio);
+   this.renderer.setPixelRatio(dpr*profile.renderScale);
+   this.renderer.shadowMap.enabled=profile.shadowsEnabled;
+   this.renderer.shadowMap.autoUpdate=profile.shadowAutoUpdate;
+   if(profile.shadowsEnabled&&profile.shadowMapSize!==this.sun.shadow.mapSize.x){this.sun.shadow.mapSize.set(profile.shadowMapSize,profile.shadowMapSize);this.sun.shadow.map?.dispose();this.sun.shadow.map=null;}
+   const extent=profile.shadowDistance;
+   Object.assign(this.sun.shadow.camera,{left:-extent,right:extent,top:extent,bottom:-extent,far:Math.max(50,extent*2.2)});
+   this.sun.shadow.camera.updateProjectionMatrix();
    this.renderer.shadowMap.needsUpdate=true;
    this._shadowState=null;
    this.renderer.setSize(innerWidth,innerHeight);
-   this.atmosphere?.setQuality(value);
+   this.atmosphere?.setQuality(decision.quality);
+   if(this.pollen)this.pollen.visible=profile.pollenEnabled;
+   if(this.finalEdges)this.finalEdges.mode=profile.edgePass;
   }
   resize(){this.camera.aspect=innerWidth/innerHeight;this.camera.updateProjectionMatrix();this.renderer.setSize(innerWidth,innerHeight);this.atmosphere?.resize();}
   look(dx,dy){this.yaw-=dx*.003;this.pitch=T.MathUtils.clamp(this.pitch-dy*.003,-1.15,.8);}
@@ -611,9 +684,9 @@ export class World {
    this.time+=dt;this.wind=settings.wind;this.weather=settings.weather;
    if(!prepared)this.prepareFrame(dt,sim,input,settings);
    const bottle=this.items.bottle,pipe=this.items.pipe,lighter=this.items.lighter;
-   const waterHeight=Math.max(.001,sim.water*.19);this.liquid.update(sim.water,this.time);
+   const waterHeight=Math.max(.001,sim.water*.19);this.liquid.update(sim.water,this.time,sim.flow);
    this.bottleSmoke.visible=sim.smoke>.002;
-   const smoke=this.bottleSmoke.material.uniforms;smoke.uTime.value=this.time;smoke.uDensity.value=sim.smokeDensity;smoke.uWater.value=.012+waterHeight;smoke.uCam.value.copy(bottle.worldToLocal(this.camera.position.clone()));
+   const smoke=this.bottleSmoke.material.uniforms;smoke.uTime.value=this.time;smoke.uDensity.value=sim.smokeDensity;smoke.uLoad.value=sim.smoke;smoke.uWater.value=.012+waterHeight;smoke.uCam.value.copy(bottle.worldToLocal(this.camera.position.clone()));
    this.outlet.visible=sim.outlet;this.bowlBud.visible=sim.bud>.01;this.budMat.emissive.setRGB(sim.embers*.7,sim.embers*.11,0);this.hotTip.material.opacity=sim.phase==='heat'?sim.heat*.45:0;
     if(this.pipeMat&&!this.heroProps){
      const r=sim.residue;
@@ -627,10 +700,14 @@ export class World {
    const flicker=.93+Math.sin(this.time*52)*.045+Math.sin(this.time*83)*.03;this.flameLight.intensity=flameOn?.018*flicker:0;this.emberLight.intensity=sim.embers*.008;if(flameOn&&!this.wasFlame)this.wheel.rotation.x+=1.4;this.wasFlame=flameOn;if(this.flameShader){this.flame.material.uniforms.time.value=this.time;this.flameCore.visible=false;this.flame.scale.set(1,flicker,1);}else this.flame.scale.y=(.007+.012*(sim.flameQuality||.3))*flicker;
    this.items.bag.visible=true;for(let i=0;i<this.bagNugs.length;i++)this.bagNugs[i].visible=i<sim.stock*3.5;
    this.jet.visible=sim.flow>0&&['free','inhale'].includes(sim.phase)&&sim.mode!=='fill';
-   if(this.jetShader)this.jetShader.uniforms.uTime.value=this.time;
+   if(this.jetShader){
+    this.jetShader.uniforms.uTime.value=this.time;
+   }
    if(this.jet.visible){
     const start=this.outlet.getWorldPosition(V()),direction=V(1,0,0).applyQuaternion(bottle.getWorldQuaternion(new T.Quaternion())).normalize();
-    const head=Math.max(0,this.liquid.level-start.y),speed=Math.sqrt(2*9.81*head)*.75;
+    const head=Math.max(0,this.liquid.level-start.y),rawSpeed=Math.sqrt(2*9.81*head)*.75;
+    this.jetSpeed=T.MathUtils.damp(this.jetSpeed??rawSpeed,rawSpeed,14,dt);
+    const speed=this.jetSpeed;
     const fall=Math.max(.035,start.y-this.ground(start.x,start.z)),duration=Math.sqrt(2*fall/9.81);
     const points=[];const steps=14;let impactPoint=null;
     for(let i=0;i<=steps;i++){
@@ -640,21 +717,46 @@ export class World {
      points.push(pt);if(i===steps)impactPoint=pt;
     }
     if(points.length>=2){
-     this.jet.geometry.dispose();this.jet.geometry=new T.TubeGeometry(new T.CatmullRomCurve3(points),16,.003,8,false);this.jet.position.set(0,0,0);this.jet.scale.setScalar(1);this.jet.quaternion.identity();
+     // Keep the GPU-side geometry and its attribute objects stable while the
+     // jet moves. Replacing the mesh geometry every frame repeatedly allocated
+     // and destroyed WebGL buffers during drainage.
+     const streamRadius=T.MathUtils.clamp(.00135+speed*.00115,.00145,.003);
+     const next=new T.TubeGeometry(new T.CatmullRomCurve3(points),16,streamRadius,8,false),target=this.jet.geometry;
+     for(const name of ['position','normal']){
+      const source=next.getAttribute(name),attribute=target.getAttribute(name);
+      if(source?.count===attribute?.count){attribute.array.set(source.array);attribute.needsUpdate=true;}
+     }
+     next.dispose();
+     this.jet.position.set(0,0,0);this.jet.scale.setScalar(1);this.jet.quaternion.identity();
     }
     if(impactPoint&&this.splashRing){
      this.splashRing.visible=true;this.splashRing.position.copy(impactPoint).add(V(0,.001,0));
-     const splashPhase=(this.time*9.0)%1.0;this.splashRing.scale.setScalar(.6+splashPhase*1.2);this.splashRing.material.opacity=(1.0-splashPhase)*.68*Math.min(1.0,speed*2.0);
+     const splashPhase=(this.time*5.5)%1.0;this.splashRing.scale.setScalar(.6+splashPhase*1.05);this.splashRing.material.opacity=(1.0-splashPhase)*.56*Math.min(1.0,speed*2.0);
     }
     if(this.jetDrops&&points.length>=4){
-     const tailIdx=Math.floor(points.length*.7);
+     const tailIdx=Math.floor(points.length*.6);
      for(let i=0;i<this.jetDrops.length;i++){
-      const drop=this.jetDrops[i];drop.visible=true;const frac=(i+(this.time*8.0)%1.0)/this.jetDrops.length;
-      drop.position.copy(points[tailIdx]).lerp(points[points.length-1],frac);
-      drop.position.x+=Math.sin(this.time*30.0+i*2.1)*.0012;drop.position.z+=Math.cos(this.time*35.0+i*2.7)*.0012;
+      const drop=this.jetDrops[i];drop.visible=true;
+      if(i<6){
+       const frac=(i+(this.time*7.0)%1.0)/6.0;
+       drop.position.copy(points[tailIdx]).lerp(points[points.length-1],frac);
+       drop.position.x+=Math.sin(this.time*22.0+i*2.1)*.0008;drop.position.z+=Math.cos(this.time*25.0+i*2.7)*.0008;
+      }else if(impactPoint){
+       const k=i-6;
+       const splashAge=(this.time*5.0+k*.35)%1.0;
+       const angle=k*(Math.PI/3)+Math.sin(k*5.0);
+       const sprayDist=splashAge*.020*Math.min(1.0,speed*1.8);
+       const sprayHeight=Math.sin(splashAge*Math.PI)*.010;
+       drop.position.set(
+        impactPoint.x+Math.cos(angle)*sprayDist,
+        impactPoint.y+sprayHeight,
+        impactPoint.z+Math.sin(angle)*sprayDist
+       );
+      }
      }
     }
    }else{
+    this.jetSpeed=undefined;
     if(this.splashRing)this.splashRing.visible=false;
     if(this.jetDrops)for(const d of this.jetDrops)d.visible=false;
    }

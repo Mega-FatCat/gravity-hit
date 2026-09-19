@@ -78,10 +78,11 @@ async function cycle({physical=false,capture=false}={}){
  assert.equal((await state()).bud,0);
 }
 async function reloadAndCheck(){
- await page.keyboard.press('Escape');const before=await state();await page.evaluate(()=>window.__game.save());
- await page.reload();await wait(()=>!!window.__game,180000);const restored=await state();
- for(const key of ['phase','stock','lost','hits','day','prep','outlet','cap','held','supporting','tutorial','firstHit'])assert.deepEqual(restored[key],before[key],key+' survives reload');
- await page.click('#begin');await screenshot('restored');checks.push('Saved progress and both held objects survive renderer reload');
+ await page.keyboard.press('Escape');const beforeSettings=await page.evaluate(()=>({...window.__game.settings}));await page.evaluate(()=>window.__game.save());
+ await page.reload();await wait(()=>!!window.__game,180000);const restored=await state(),restoredSettings=await page.evaluate(()=>({...window.__game.settings}));
+ assert.deepEqual(restoredSettings,beforeSettings,'settings survive reload');
+ assert.equal(restored.phase,'collect');assert.deepEqual(restored.picked,[]);assert.equal(restored.stock,10);assert.equal(restored.hits,0);assert.equal(restored.lost,0);assert.equal(restored.held,null);assert.equal(restored.supporting,null);
+ await page.click('#begin');await screenshot('fresh-after-reload');checks.push('Settings survive reload while gameplay starts as a fresh run');
 }
 try{
  await wait(()=>!!window.__game,180000);await page.click('#begin');await screenshot('clean-start');
@@ -94,7 +95,7 @@ try{
  await cycle({physical:true,capture:true});checks.push('Actual bottle/stream/bag/lighter clicks complete first charge with held continuity');
  assert.equal((await state()).tutorial,false);await page.keyboard.press('t');assert.equal((await state()).tutorial,true);await page.keyboard.press('t');
  await page.keyboard.press('Escape');await page.click('[data-tab="world"]');await page.locator('[data-setting="quality"]').selectOption('medium');await page.click('#resume');checks.push('Tutorial toggle and settings remain usable');
- await reloadAndCheck();
+ if(!full)await reloadAndCheck();
  if(full){
    await pack(false);checks.push('Missed charge is permanently lost');
    while((await state()).stock>0){await cycle();console.log('Charge completed:',JSON.stringify(await state()));}

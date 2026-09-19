@@ -12,7 +12,7 @@ function assertInvariants(s, msg = '') {
   s.assert();
   assert.ok(s.water >= 0 && s.water <= 1, `${msg}: water out of bounds: ${s.water}`);
   assert.ok(s.smoke >= 0 && s.smoke <= 1, `${msg}: smoke out of bounds: ${s.smoke}`);
-  assert.ok(s.smoke <= 1 - s.water + 1e-6, `${msg}: smoke (${s.smoke}) exceeds available air (${1 - s.water})`);
+  assert.ok(s.smokeDensity >= 0 && s.smokeDensity <= 1, `${msg}: visual smoke density out of bounds: ${s.smokeDensity}`);
   assert.ok(s.bud >= 0 && s.bud <= 1, `${msg}: bud out of bounds: ${s.bud}`);
   assert.ok(s.embers >= 0 && s.embers <= 1, `${msg}: embers out of bounds: ${s.embers}`);
   assert.ok(s.stock >= 0, `${msg}: stock negative: ${s.stock}`);
@@ -170,20 +170,18 @@ test('GH-46 [6]: Pack, load, and spill mechanics', () => {
   assert.equal(s.lost, 1, 'Spilled charge must be permanently recorded as lost');
 });
 
-test('GH-46 [7]: Heating mechanics require proper lighter tilt', () => {
+test('GH-46 [7]: Heating mechanics with lighter aim and flame contact', () => {
   const s = new Simulation();
   s.action('pipe');
   s.action('lighter');
   assert.equal(s.phase, 'heat');
   assert.equal(s.mode, 'heat');
 
-  // Wrong tilt (95 deg, outside effective flame range) produces no flame contact
-  s.angle = 95;
-  advance(s, 2, {fire: true, aim: 1});
+  // No fire produces no heating
+  advance(s, 2, {fire: false, aim: 1});
   assert.equal(s.heat, 0);
 
-  // Proper tilt (45 deg) heats glass tip
-  s.angle = 45;
+  // Aimed flame heats glass tip
   advance(s, 2, {fire: true, aim: 1});
   assert.ok(s.heat > 0.3);
 
@@ -270,7 +268,7 @@ test('GH-46 [10]: Drainage, Torricelli cutoff, and smoke vacuum invariants', () 
   advance(s, 4, {fire: true, aim: 1, seal: false});
   assert.ok(s.water < 0.85);
   assert.ok(s.smoke > 0.1);
-  assert.ok(s.smoke <= 1 - s.water + 1e-6);
+  assert.ok(s.smoke <= 1);
 
   // Empty pipe scenario: water drains, but zero smoke
   const sEmpty = new Simulation({phase: 'free', prep: 2, outlet: true, cap: true, water: 1, bud: 0, held: 'bottle'});

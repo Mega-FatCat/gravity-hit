@@ -148,7 +148,7 @@ export class Liquid {
     }
   }
 
-  update(amount, time) {
+  update(amount, time, flow = 0) {
     this.bottle.updateWorldMatrix(true, false);
     this.inverse.copy(this.bottle.matrixWorld).invert();
     const m = this.bottle.matrixWorld.elements;
@@ -168,7 +168,9 @@ export class Liquid {
       const rawAx = (vx - this.prevVel.x) / dt;
       const rawAz = (vz - this.prevVel.z) / dt;
 
-      const alpha = Math.min(1.0, dt * 14.0);
+      // Filter pose-derived acceleration before it reaches the spring. Short
+      // transform discontinuities must not read as impossible liquid forces.
+      const alpha = Math.min(1.0, dt * 8.0);
       this.filteredAx += (rawAx - this.filteredAx) * alpha;
       this.filteredAz += (rawAz - this.filteredAz) * alpha;
 
@@ -200,7 +202,7 @@ export class Liquid {
     this.localWaterPlane.set(lp[0], lp[1], lp[2], lp[3]);
 
     this.surfaceUniforms.uTime.value = time;
-    const sloshMag = Math.hypot(this.surfaceCore.sx, this.surfaceCore.sz);
+    const sloshMag = Math.hypot(this.surfaceCore.sx, this.surfaceCore.sz) + flow * 4.5;
     this.surfaceUniforms.uSlosh.value = sloshMag;
     this.surfaceUniforms.uSurfaceNormal.value.set(nx, ny, nz);
 

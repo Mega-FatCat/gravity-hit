@@ -20,12 +20,12 @@ test('ATM-01 solar projection is invariant under camera translation for a direct
  a.dispose();
 });
 
-test('ATM-01 Low and explicit off bypass depth; resizing quality keeps bounded targets',()=>{
+test('ATM-01 every preset keeps a bounded atmosphere target and explicit off bypasses depth',()=>{
  const {atmosphere:a}=fixture();
- a.setQuality('medium');assert.deepEqual(a.getDiagnostics().effectResolution,{width:640,height:360,scale:1/3});assert.equal(a.sampleCount,40);
- a.setQuality('high');assert.equal(a.sampleCount,64);assert.equal(a.effectResolution.width,960);
- a.setQuality('low');assert.equal(a.needsDepth(),false);
- a.setQuality('medium');a.enabled=false;assert.equal(a.needsDepth(),false);
+ a.setQuality('medium');assert.deepEqual(a.getDiagnostics().effectResolution,{width:460,height:259,scale:.24});assert.equal(a.sampleCount,24);
+ a.setQuality('high');assert.equal(a.sampleCount,32);assert.equal(a.effectResolution.width,537);
+ a.setQuality('low');assert.equal(a.sampleCount,12);assert.equal(a.effectResolution.width,345);assert.equal(a.needsDepth(),true);
+ a.setEnabled(false);assert.equal(a.needsDepth(),false);
  a.dispose();assert.equal(a._volumeTarget,null);
 });
 

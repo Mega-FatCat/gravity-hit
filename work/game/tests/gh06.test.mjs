@@ -91,30 +91,19 @@ test('GH-06: standalone lighter does not trigger pipe/bottle actions without pre
   assert.equal(s.held, 'lighter');
 });
 
-test('GH-06: lighter tilt mechanics apply during standalone use', () => {
+test('GH-06: lighter tilt controls removed; A/D reserved for cap threads', () => {
   const s = new Simulation();
   s.action('lighter');
-  s.angle = 0;
+  assert.equal(s.angle, 0);
 
-  // A tilts left (reduces angle)
+  // Left and right (A/D) do not alter lighter angle
   advance(s, 0.5, {left: true, fire: true});
-  assert.ok(s.angle < 0, 'Left tilt decreases angle');
-  assert.ok(s.flameQuality > 0, 'Flame remains lit during moderate tilt');
+  assert.equal(s.angle, 0, 'A does not tilt lighter');
+  assert.ok(s.flameQuality > 0, 'Flame remains lit when aimed');
 
-  // Extreme tilt beyond -75 degrees blows out flame
-  s.angle = -80;
-  s.step(0.05, {fire: true});
-  assert.equal(s.flameQuality, 0, 'Flame blows out beyond -75 degrees');
-
-  // Returning to safe angle restores flame
-  s.angle = 45;
-  s.step(0.05, {fire: true});
-  assert.ok(s.flameQuality > 0, 'Flame restored at normal angle');
-
-  // Extreme tilt beyond +85 degrees blows out flame
-  s.angle = 90;
-  s.step(0.05, {fire: true});
-  assert.equal(s.flameQuality, 0, 'Flame blows out beyond +85 degrees');
+  advance(s, 0.5, {right: true, fire: true});
+  assert.equal(s.angle, 0, 'D does not tilt lighter');
+  assert.ok(s.flameQuality > 0, 'Flame remains lit when aimed');
 });
 
 test('GH-06: transition seamlessly between standalone lighter and dedicated heating mechanics', () => {

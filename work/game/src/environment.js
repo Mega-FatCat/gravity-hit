@@ -222,6 +222,9 @@ export function forestHeight(x,z){
  const rootBerm=rootSoilBerm(x,z);
  return bankHeight+rootBerm*smooth(s,0.3,0.8);
 }
+export function plantRootBurial(height,isBush=true){
+ return isBush?T.MathUtils.clamp(.018+height*.012,.018,.048):.012;
+}
 function addMesh(world,geometry,material,name){const m=new T.Mesh(geometry,material);m.name=name;m.receiveShadow=true;world.scene.add(m);return m;}
 function placeAllowed(x,z,height=.3,margin=.16,slabMargin=0){
  const isBush=height>.25;
@@ -247,12 +250,22 @@ function placeAllowed(x,z,height=.3,margin=.16,slabMargin=0){
  return true;
 }
 function instances(world,geometry,material,placements,name,shadow=true){
- const batches=new Map(),d=new T.Object3D(),color=new T.Color();
+  const batches=new Map(),d=new T.Object3D(),color=new T.Color();
  // Previously unshadowed undergrowth needs local occlusion, but distant
  // carpets must not all enter the shadow pass. Split only these near batches.
- const localShadow=!shadow&&material.userData.foliage&&!/grass/i.test(name);
- for(const p of placements){const key=`${Math.floor(p.x/8)},${Math.floor(p.z/8)}${localShadow?(Math.hypot(p.x,p.z-2.65)<5?':shadow':':unshadowed'):''}`;if(!batches.has(key))batches.set(key,[]);batches.get(key).push(p);}
- for(const [key,list]of batches){const m=new T.InstancedMesh(geometry,material,list.length);m.name=`${name}:${key}`;m.castShadow=localShadow?key.endsWith(':shadow'):shadow&&list.some(p=>Math.hypot(p.x,p.z-.8)<12);m.receiveShadow=true;
+  const localShadow=!shadow&&material.userData.foliage&&!/grass/i.test(name);
+  const density=material.userData.foliage?(world.profile?.foliageDensityScale??1):1;
+  const nearDensity=world.profile?.foliageNearDensityScale??density,nearRadius=world.profile?.foliageNearRadius??0;
+  const renderPlacements=density>=.999&&nearDensity>=.999?placements:placements.filter((p,i)=>{
+   const threshold=Math.hypot(p.x,p.z-2.65)<nearRadius?nearDensity:density;
+   return((Math.imul(i+1,2654435761)>>>0)/4294967296)<threshold;
+  });
+  // Distant vegetation is visually identical in slightly larger spatial
+  // batches, which removes hundreds of calls across the water render passes.
+  const tileSize=/distant|perimeter|outer|far/i.test(name)?12:8;
+  for(const p of renderPlacements){const key=`${Math.floor(p.x/tileSize)},${Math.floor(p.z/tileSize)}${localShadow?(Math.hypot(p.x,p.z-2.65)<5?':shadow':':unshadowed'):''}`;if(!batches.has(key))batches.set(key,[]);batches.get(key).push(p);}
+ const shadowDistance=world.profile?.shadowCasterDistance??12;
+ for(const [key,list]of batches){const m=new T.InstancedMesh(geometry,material,list.length);m.name=`${name}:${key}`;m.castShadow=localShadow?key.endsWith(':shadow'):shadow&&list.some(p=>Math.hypot(p.x,p.z-.8)<shadowDistance);m.receiveShadow=true;
   if(m.castShadow&&material.userData.foliage&&material.alphaTest>0)m.customDepthMaterial=foliageDepthMaterial(material,world);
   list.forEach((p,i)=>{d.position.set(p.x,p.y??forestHeight(p.x,p.z),p.z);if(p.q)d.quaternion.set(p.q[0],p.q[1],p.q[2],p.q[3]);else d.rotation.set(p.rx||0,p.rot||0,p.rz||0);d.scale.set(p.sx??p.s??1,p.sy??p.s??1,p.sz??p.s??1);d.updateMatrix();m.setMatrixAt(i,d.matrix);const light=p.tint??1;color.setRGB(light,light*(p.green??1),light*(p.blue??1));m.setColorAt(i,color);});
   m.computeBoundingSphere();m.computeBoundingBox();world.scene.add(m);
@@ -386,7 +399,8 @@ function plantVariants(model){
  }).filter(Boolean);
 }
 
-export function buildForestFloor(world){
+export async function buildForestFloor(world){
+ await world.loadingCheckpoint?.('terrain',.04,'Preparing terrain materials','Forest soil and creek substrate');
  world.environmentVersion='woodland-recovery-2';
  // Lighting still comes from the scanned HDR. A distant sky behind real trees
  // avoids projecting the photograph's nearby giant trunks onto our horizon.
@@ -397,14 +411,14 @@ export function buildForestFloor(world){
    // Scanned broadleaf masks shipped nearly binary.  Use the generated narrow
    // coverage ramp for those assets; conifers/grass keep their authored masks.
    const alphaFile=/^(fern_02|shrub_0[234])$/.test(id)?'alpha_forest.png':'alpha.png';
-   world.foliageAlphaReady.push(new Promise((resolve,reject)=>{const texture=alphaLoader.load(`./assets/${id}/${alphaFile}`,resolve,undefined,reject);texture.flipY=false;texture.anisotropy=8;texture.minFilter=T.LinearMipmapLinearFilter;texture.magFilter=T.LinearFilter;world.foliageAlphaTextures[id]=texture;}));
+   world.foliageAlphaReady.push(new Promise((resolve,reject)=>{const texture=alphaLoader.load(`./assets/${id}/${alphaFile}`,resolve,undefined,reject);texture.flipY=false;texture.anisotropy=world.profile?.anisotropy??4;texture.minFilter=T.LinearMipmapLinearFilter;texture.magFilter=T.LinearFilter;world.foliageAlphaTextures[id]=texture;}));
   }
   for(const id of ['shrub_02','shrub_03','shrub_04']){
    world.foliageAlphaReady.push(new Promise((resolve,reject)=>{
     const texture=alphaLoader.load(`./assets/${id}/diff_forest_rgba.png`,loaded=>{
      try{foliageMipmaps(loaded,.26);resolve(loaded);}catch(error){reject(error);}
     },undefined,reject);
-    texture.flipY=false;texture.colorSpace=T.SRGBColorSpace;texture.anisotropy=16;
+    texture.flipY=false;texture.colorSpace=T.SRGBColorSpace;texture.anisotropy=world.profile?.anisotropy??4;
     texture.minFilter=T.LinearMipmapLinearFilter;texture.magFilter=T.LinearFilter;
     world.foliageDiffuseTextures[id]=texture;
     world.foliagePackedTextures[id]=texture;
@@ -412,7 +426,7 @@ export function buildForestFloor(world){
   }
   for(const id of ['fir_sapling','shrub_01'])world.foliageAlphaReady.push(new Promise((resolve,reject)=>{
    const texture=alphaLoader.load(`./assets/${id}/diff_forest.png`,resolve,undefined,reject);
-   texture.flipY=false;texture.colorSpace=T.SRGBColorSpace;texture.anisotropy=16;
+   texture.flipY=false;texture.colorSpace=T.SRGBColorSpace;texture.anisotropy=world.profile?.anisotropy??4;
    texture.minFilter=T.LinearMipmapLinearFilter;texture.magFilter=T.LinearFilter;
    world.foliageDiffuseTextures[id]=texture;
   }));
@@ -480,26 +494,34 @@ roughnessFactor = mix(roughnessFactor, .82, vCreekSurface.z * .45);`));
  world.barkMat=new T.MeshStandardMaterial({color:'#aaa28b',roughness:.96});
  const axis=[];for(let x=-80;x< -14;x+=2)axis.push(x);for(let x=-14;x< -9;x+=.4)axis.push(x);for(let i=0;i<=720;i++)axis.push(-9+i*.025);for(let x=9.4;x<=14;x+=.4)axis.push(x);for(let x=16;x<=80;x+=2)axis.push(x);
   const n=axis.length,positions=[],uvs=[],colors=[],creekSurface=[],indices=[];
- for(let zi=0;zi<n;zi++)for(let xi=0;xi<n;xi++){
-  const x=axis[xi],z=axis[zi],y=forestHeight(x,z),half=creekWidth(z)*.5,d=Math.abs(x-creekX(z)),edge=noise(x*3.3+8,z*3.3)*.21+noise(x*8,z*8)*.06;
-  const wet=1-smooth(y+edge*.12,W-.025,W+.065),gravel=1-smooth(d+edge,half-.13,half+.44);
-  const edgeDist=d+edge*.42;
-  const bankDamp=(1-smooth(y,W-.01,W+.14))*smooth(edgeDist,half-.08,half+.18)*(1-smooth(edgeDist,half+.18,half+.78));
-  creekSurface.push(gravel,wet,bankDamp,0);
-  positions.push(x,y,z);uvs.push(x*.5,z*.5);
-  // Vertex values are linear multipliers, not a second black soil material.
-  const dist=Math.hypot(x,z-.8),canopy=smooth(dist,2.5,13),v=(.56+noise(x*.6,z*.6)*.32)*(1-canopy*.40);
-  const distantShade=1-smooth(dist,22,60)*.42;const vD=v*distantShade;
-  colors.push(vD*(1-wet*.16),vD*(1-wet*.18),vD*(1-wet*.22));
+ for(let zi=0;zi<n;zi++){
+  for(let xi=0;xi<n;xi++){
+   const x=axis[xi],z=axis[zi],y=forestHeight(x,z),half=creekWidth(z)*.5,d=Math.abs(x-creekX(z)),edge=noise(x*3.3+8,z*3.3)*.21+noise(x*8,z*8)*.06;
+   const wet=1-smooth(y+edge*.12,W-.025,W+.065),gravel=1-smooth(d+edge,half-.13,half+.44);
+   const edgeDist=d+edge*.42;
+   const bankDamp=(1-smooth(y,W-.01,W+.14))*smooth(edgeDist,half-.08,half+.18)*(1-smooth(edgeDist,half+.18,half+.78));
+   creekSurface.push(gravel,wet,bankDamp,0);
+   positions.push(x,y,z);uvs.push(x*.5,z*.5);
+   // Vertex values are linear multipliers, not a second black soil material.
+   const dist=Math.hypot(x,z-.8),canopy=smooth(dist,2.5,13),v=(.56+noise(x*.6,z*.6)*.32)*(1-canopy*.40);
+   const distantShade=1-smooth(dist,22,60)*.42;const vD=v*distantShade;
+   colors.push(vD*(1-wet*.16),vD*(1-wet*.18),vD*(1-wet*.22));
+  }
+  if(zi%24===23)await world.loadingCheckpoint?.('terrain',.06+.17*(zi+1)/n,'Shaping forest terrain',`Height field ${zi+1} of ${n}`,zi+1,n);
  }
- for(let z=0;z<n-1;z++)for(let x=0;x<n-1;x++){const a=z*n+x,b=a+1,c=a+n,d=c+1;indices.push(a,c,b,b,c,d);}
+ for(let z=0;z<n-1;z++){
+  for(let x=0;x<n-1;x++){const a=z*n+x,b=a+1,c=a+n,d=c+1;indices.push(a,c,b,b,c,d);}
+  if(z%48===47)await world.loadingCheckpoint?.('terrain',.23+.08*(z+1)/(n-1),'Connecting terrain surface',`Mesh row ${z+1} of ${n-1}`,z+1,n-1);
+ }
+  await world.loadingCheckpoint?.('terrain',.32,'Smoothing terrain lighting','Calculating ground normals');
   const geo=new T.BufferGeometry();geo.setAttribute('position',new T.Float32BufferAttribute(positions,3));geo.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));geo.setAttribute('color',new T.Float32BufferAttribute(colors,3));geo.setAttribute('creekSurface',new T.Float32BufferAttribute(creekSurface,4));geo.setIndex(indices);geo.computeVertexNormals();
  world.groundMesh=addMesh(world,geo,world.groundMat,'Forest loam â€˘ high-resolution near-field relief');world.groundMesh.castShadow=false;
  const stone=new T.IcosahedronGeometry(1,2),p=stone.attributes.position;
  for(let i=0;i<p.count;i++){const x=p.getX(i),y=p.getY(i),z=p.getZ(i),f=.94+noise(x*4+11,z*4+y)*.15;p.setXYZ(i,x*f,y*f,z*f);}stone.computeVertexNormals();
  world.slab=addMesh(world,stone,world.rockMat,'Ritual stone');world.slab.position.set(0,.06,.8);world.slab.scale.set(.80,.23,.58);world.slab.castShadow=true;
  world.bedMat=world.groundMat;
-  buildStreambed(world);
+  await world.loadingCheckpoint?.('terrain',.40,'Laying the stream bed','Packing physical stone layers');
+  await buildStreambed(world);
   // Reuse the already-loaded 4K stream-rock maps for subtle substrate detail;
   // this adds resolution to the ground without loading a second texture set.
   const detailMat=world.streambedMaterials?.gritMat;
@@ -508,27 +530,33 @@ roughnessFactor = mix(roughnessFactor, .82, vCreekSurface.z * .45);`));
    for(let i=0;i<wp.count;i++){const z=-wp.getY(i),x=creekX(z)+creekBankMeander(z)+wp.getX(i)*creekWidth(z)*1.14;wp.setX(i,x);}waterGeo.computeVertexNormals();
     const normalData=new Uint8Array(256*256*4);
     const heightData=new Float32Array(256*256);
-    for(let y=0;y<256;y++)for(let x=0;x<256;x++){
-     const u=(x/256)*Math.PI*2,v=(y/256)*Math.PI*2;
-     const h=Math.sin(u*4.0+Math.cos(v*3.0))*0.32
+    for(let y=0;y<256;y++){
+     for(let x=0;x<256;x++){
+      const u=(x/256)*Math.PI*2,v=(y/256)*Math.PI*2;
+      const h=Math.sin(u*4.0+Math.cos(v*3.0))*0.32
             +Math.cos(v*5.0-Math.sin(u*3.0))*0.26
             +Math.sin((u+v)*7.0)*0.20
             +Math.cos((u-v)*9.0)*0.14
             +Math.sin(u*13.0+v*11.0)*0.08;
-     heightData[y*256+x]=h;
+      heightData[y*256+x]=h;
+     }
+     if(y%64===63)await world.loadingCheckpoint?.('terrain',.79+.02*(y+1)/256,'Preparing stream surface',`Ripple field ${y+1} of 256`,y+1,256);
     }
-    for(let y=0;y<256;y++)for(let x=0;x<256;x++){
-     const xL=(x-1+256)%256,xR=(x+1)%256,yD=(y-1+256)%256,yU=(y+1)%256;
-     const dhdx=(heightData[y*256+xR]-heightData[y*256+xL])*1.4;
-     const dhdy=(heightData[yU*256+x]-heightData[yD*256+x])*1.4;
-     let nx=-dhdx,ny=-dhdy,nz=1.0;
-     const len=Math.hypot(nx,ny,nz);
-     nx/=len;ny/=len;nz/=len;
-     const i=(y*256+x)*4;
-     normalData[i]=Math.round((nx*0.5+0.5)*255);
-     normalData[i+1]=Math.round((ny*0.5+0.5)*255);
-     normalData[i+2]=Math.round((nz*0.5+0.5)*255);
-     normalData[i+3]=255;
+    for(let y=0;y<256;y++){
+     for(let x=0;x<256;x++){
+      const xL=(x-1+256)%256,xR=(x+1)%256,yD=(y-1+256)%256,yU=(y+1)%256;
+      const dhdx=(heightData[y*256+xR]-heightData[y*256+xL])*1.4;
+      const dhdy=(heightData[yU*256+x]-heightData[yD*256+x])*1.4;
+      let nx=-dhdx,ny=-dhdy,nz=1.0;
+      const len=Math.hypot(nx,ny,nz);
+      nx/=len;ny/=len;nz/=len;
+      const i=(y*256+x)*4;
+      normalData[i]=Math.round((nx*0.5+0.5)*255);
+      normalData[i+1]=Math.round((ny*0.5+0.5)*255);
+      normalData[i+2]=Math.round((nz*0.5+0.5)*255);
+      normalData[i+3]=255;
+     }
+     if(y%64===63)await world.loadingCheckpoint?.('terrain',.81+.02*(y+1)/256,'Preparing stream surface',`Water normals ${y+1} of 256`,y+1,256);
     }
     const normalTex=new T.DataTexture(normalData,256,256,T.RGBAFormat);normalTex.wrapS=normalTex.wrapT=T.RepeatWrapping;normalTex.magFilter=T.LinearFilter;normalTex.minFilter=T.LinearMipmapLinearFilter;normalTex.generateMipmaps=true;normalTex.needsUpdate=true;
  world.stream=createStreamWater(world,waterGeo,normalTex,W);
@@ -537,6 +565,7 @@ roughnessFactor = mix(roughnessFactor, .82, vCreekSurface.z * .45);`));
  const hemi=world.scene.children.find(o=>o.isHemisphereLight);if(hemi){hemi.color.set('#b8c8d2');hemi.groundColor.set('#71664b');hemi.intensity=1.1;world.forestHemisphere=hemi;}
  world.sun.position.set(-12,26,-9);world.sun.color.set('#ffe8bc');world.sun.intensity=1.7;
  world.sun.shadow.camera.left=-28;world.sun.shadow.camera.right=28;world.sun.shadow.camera.top=28;world.sun.shadow.camera.bottom=-28;world.sun.shadow.camera.far=90;world.sun.shadow.camera.updateProjectionMatrix();world.sun.shadow.normalBias=.008;world.sun.shadow.bias=-.00005;
+ await world.loadingCheckpoint?.('terrain',.85,'Stream ready','Terrain, water and stones assembled');
 }
 
 function plantModel(world,model,{name,seed,count,radius=17,minRadius=0,height=[.2,.5],wind=.025,near=.9,shadow=true,cluster=1.8,maxTriangles=Infinity,belt=false,midground=false,variantPattern=null,nearPatches=false,lodModel=null,lodDistance=6,layered=false,layerScale=.76,layerYScale=.90,layerMaxDistance=8,visualFamilies=null,primaryWeight=1,scatterChance=null,streamBand=null}){
@@ -731,7 +760,7 @@ function plantModel(world,model,{name,seed,count,radius=17,minRadius=0,height=[.
    const cardLeanX=cardBroadleaf?(hash(Math.round(x*43)+seed%733,Math.round(z*79)+11)-.5)*.24:0;
    const cardLeanZ=cardBroadleaf?(hash(Math.round(x*83)+29,Math.round(z*41)+seed%701)-.5)*.24:0;
    const cardHeight=cardBroadleaf?.76+cardShape*.52:1,cardWidth=cardBroadleaf?.88+(1-cardShape)*.20:1;
-   family.sets[index].push({x,z,y:forestHeight(x,z)-.007,sx:s*sxMul*family.widthScale*cardWidth,sy:s*syMul*family.heightScale*cardHeight,sz:s*szMul*family.widthScale*cardWidth,rot:rotBase*TAU,rx:rx*family.tiltScale+cardLeanX,rz:rz*family.tiltScale+cardLeanZ,tint,green,blue});
+   family.sets[index].push({x,z,y:forestHeight(x,z)-plantRootBurial(h,isBush),sx:s*sxMul*family.widthScale*cardWidth,sy:s*syMul*family.heightScale*cardHeight,sz:s*szMul*family.widthScale*cardWidth,rot:rotBase*TAU,rx:rx*family.tiltScale+cardLeanX,rz:rz*family.tiltScale+cardLeanZ,tint,green,blue});
   }
   families.forEach((family,fi)=>family.variants.forEach((variant,i)=>{
    if(!family.sets[i].length)return;
@@ -765,7 +794,7 @@ function plantModel(world,model,{name,seed,count,radius=17,minRadius=0,height=[.
       const inner=layeredPlacements.map((p,j)=>{
        const h1=hash(Math.round(p.x*137)+i*17+j,Math.round(p.z*131)+fi*29),h2=hash(Math.round(p.x*83)+41,Math.round(p.z*97)+j*7);
        const scale=layerScale*(.84+h1*.26);
-       return{...p,y:(p.y??forestHeight(p.x,p.z))+(.015+h2*.035)*(p.sy??1),rot:(p.rot??0)+.48+h1*1.35+i*.17,
+       return{...p,y:(p.y??forestHeight(p.x,p.z))-.006,rot:(p.rot??0)+.48+h1*1.35+i*.17,
         rx:(p.rx??0)+(h2-.5)*.16,rz:(p.rz??0)+(h1-.5)*.14,sx:(p.sx??1)*scale,sy:(p.sy??1)*layerYScale*(.90+h2*.18),sz:(p.sz??1)*scale,
         tint:(p.tint??1)*(.94+h2*.05)};
       });
@@ -774,7 +803,7 @@ function plantModel(world,model,{name,seed,count,radius=17,minRadius=0,height=[.
       const nearInner=layeredPlacements.filter(p=>Math.hypot(p.x,p.z-2.65)<4.6).map((p,j)=>{
        const h1=hash(Math.round(p.x*173)+j*11,Math.round(p.z*149)+i*31),h2=hash(Math.round(p.x*71)+19,Math.round(p.z*67)+j*13);
        const scale=layerScale*(.50+h1*.16);
-       return{...p,y:(p.y??forestHeight(p.x,p.z))+(.05+h2*.06)*(p.sy??1),rot:(p.rot??0)-.62-h1*1.18,
+       return{...p,y:(p.y??forestHeight(p.x,p.z))-.012,rot:(p.rot??0)-.62-h1*1.18,
         rx:(p.rx??0)+(h1-.5)*.22,rz:(p.rz??0)+(h2-.5)*.20,sx:(p.sx??1)*scale,sy:(p.sy??1)*layerYScale*(.58+h2*.14),sz:(p.sz??1)*scale,
         tint:(p.tint??1)*(.91+h1*.06)};
       });
@@ -783,7 +812,7 @@ function plantModel(world,model,{name,seed,count,radius=17,minRadius=0,height=[.
       const closeCore=layeredPlacements.filter((p,j)=>Math.hypot(p.x,p.z-2.65)<3.0&&hash(Math.round(p.x*211)+j*31,Math.round(p.z*199)+i*13)>.48).map((p,j)=>{
        const h1=hash(Math.round(p.x*191)+j*23+i*5,Math.round(p.z*181)+fi*17),h2=hash(Math.round(p.x*101)+29,Math.round(p.z*109)+j*19);
        const scale=layerScale*(.39+h1*.13);
-       return{...p,y:(p.y??forestHeight(p.x,p.z))+(.10+h2*.07)*(p.sy??1),rot:(p.rot??0)+1.48+h1*.92,
+       return{...p,y:(p.y??forestHeight(p.x,p.z))-.018,rot:(p.rot??0)+1.48+h1*.92,
         rx:(p.rx??0)+(h2-.5)*.25,rz:(p.rz??0)+(h1-.5)*.22,sx:(p.sx??1)*scale,sy:(p.sy??1)*layerYScale*(.48+h2*.12),sz:(p.sz??1)*scale,
         tint:(p.tint??1)*(.90+h2*.05)};
       });
@@ -1281,14 +1310,14 @@ function pineBranchMaterial(world){
  }
  return m;
 }
-function buildBroadLeafGeometry([u0,u1,v0,v1],width=.48,fold=.055,curl=.040,lowDetail=false,compact=false){
+function buildBroadLeafGeometry([u0,u1,v0,v1],width=.48,fold=.055,curl=.040,lowDetail=false,compact=false,omitStem=false){
  const geometry=new T.BufferGeometry(),positions=[],uvs=[],leafEdge=[],indices=[];
  const petiole=.38+(width-.44)*5;
  // More outline samples keep solid-geometry leaves from reading as a seven-edge
  // paper cutout against the sky. The leaf stays opaque 3D geometry; only its
  // curved silhouette gets enough segments to resolve like a natural blade.
- const rows=compact?(lowDetail?[0,.48,1]:[0,.26,.64,1]):lowDetail?[0,.10,.22,.40,.60,.78,.90,1.0]:[0,.10,.22,.38,.55,.70,.83,.93,1.0];
- const widths=compact?(lowDetail?[0,.63,0]:[0,.475,.497,0]):lowDetail?[.035,.24,.43,.50,.46,.32,.16,.02]:[.035,.24,.42,.50,.49,.40,.28,.14,.02];
+  const rows=compact==='mid'?[0,.16,.38,.65,.84,1]:compact?(lowDetail?[0,.48,1]:[0,.26,.64,1]):lowDetail?[0,.10,.22,.40,.60,.78,.90,1.0]:[0,.10,.22,.38,.55,.70,.83,.93,1.0];
+  const widths=compact==='mid'?[.035,.34,.50,.45,.22,.02]:compact?(lowDetail?[0,.63,0]:[0,.475,.497,0]):lowDetail?[.035,.24,.43,.50,.46,.32,.16,.02]:[.035,.24,.42,.50,.49,.40,.28,.14,.02];
  for(let row=0;row<rows.length;row++){
   const t=rows[row],supportScale=lowDetail?1.075:1.045,supportT=(t-.5)*supportScale+.5,w=widths[row]*width*supportScale,ridge=Math.sin(Math.PI*t)*fold,edge=ridge-Math.sin(Math.PI*t)*curl;
   positions.push(-w,supportT+petiole,edge, 0,supportT+petiole,ridge, w,supportT+petiole,edge);
@@ -1312,14 +1341,19 @@ function buildBroadLeafGeometry([u0,u1,v0,v1],width=.48,fold=.055,curl=.040,lowD
  // A blade is attached through a real leaf stalk. Two crossing strips keep
  // this small connection visible from oblique player views; unlike the blade
  // rim, the stalk must not fade away under the leaf-edge coverage shader.
- const stem=positions.length/3,sw=.020,sy=petiole+.04;
- positions.push(0,0,0, -sw,sy,0, sw,sy,0, 0,0,0, 0,sy,-sw, 0,sy,sw);
- for(let i=0;i<6;i++){uvs.push((u0+u1)*.5,(v0+v1)*.5);leafEdge.push(1);}
- indices.push(stem,stem+1,stem+2,stem+3,stem+5,stem+4);
+  const stem=positions.length/3;
+  if(!omitStem){
+   const sw=.020,sy=petiole+.04;
+   positions.push(0,0,0, -sw,sy,0, sw,sy,0, 0,0,0, 0,sy,-sw, 0,sy,sw);
+   for(let i=0;i<6;i++){uvs.push((u0+u1)*.5,(v0+v1)*.5);leafEdge.push(1);}
+   indices.push(stem,stem+1,stem+2,stem+3,stem+5,stem+4);
+  }
  geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));
  geometry.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));
  geometry.setAttribute('leafEdge',new T.Float32BufferAttribute(leafEdge,1));
- const leafRoot=new Float32Array(positions.length/3);leafRoot[stem]=leafRoot[stem+3]=1;
+  const leafRoot=new Float32Array(positions.length/3);
+  if(omitStem)leafRoot[0]=leafRoot[1]=leafRoot[2]=1;
+  else leafRoot[stem]=leafRoot[stem+3]=1;
  geometry.setAttribute('leafRoot',new T.BufferAttribute(leafRoot,1));
  geometry.setIndex(indices);geometry.computeVertexNormals();geometry.computeBoundingBox();geometry.computeBoundingSphere();
  return geometry;
@@ -1333,7 +1367,8 @@ function broadleafLeafMaterial(source,world,distant=false,geometryEdge=false){
  // into the pale beige canopy wall seen in earlier passes.
  if(world.foliageDiffuseTextures?.shrub_01)m.map=world.foliageDiffuseTextures.shrub_01;
  m.color.setRGB(.58,.70,.43);m.roughness=.91;m.metalness=0;m.envMapIntensity=.18;m.normalScale?.set(.34,.34);
- if(m.map)m.map.anisotropy=16;if(m.normalMap)m.normalMap.anisotropy=16;if(m.roughnessMap)m.roughnessMap.anisotropy=16;
+ const anisotropy=world.profile?.anisotropy??8;
+ if(m.map)m.map.anisotropy=anisotropy;if(m.normalMap)m.normalMap.anisotropy=anisotropy;if(m.roughnessMap)m.roughnessMap.anisotropy=anisotropy;
  world.addWind(m,distant?.0025:.0060);m.userData.foliageWind=distant?.0025:.0060;
  if(geometryEdge){
   // The tree leaves are real opaque curved geometry, not alpha cards.  MSAA
@@ -1366,7 +1401,7 @@ function broadleafLeafMaterial(source,world,distant=false,geometryEdge=false){
  return foliageRendering(m,.24,.34,1.0,geometryEdge?1.35:1.35);
 }
 
-function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
+async function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
  if(!leafModel||!trees.length)return;
  const sources=sourceMeshes(leafModel);if(!sources.length)return;
  const material=broadleafLeafMaterial(sources[0].material,world,distant,true);
@@ -1375,18 +1410,26 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
  const scanBox=scanBough.boundingBox,scanCenter=scanBox.getCenter(new T.Vector3()),scanLength=Math.max(.1,scanBox.max.x-scanBox.min.x);
  scanBough.translate(-scanBox.max.x,-scanBox.min.y,-scanCenter.z);scanBough.computeBoundingBox();scanBough.computeBoundingSphere();
  const scanBoughPlacements=[],scanAxis=new T.Vector3(-1,0,0);
- const leafGeometries=[
+  const leafGeometries=[
   buildBroadLeafGeometry([.405,.600,.640,.965],.50,.060,.045,distant),
   buildBroadLeafGeometry([.220,.410,.205,.580],.46,.052,.040,distant),
   buildBroadLeafGeometry([.730,.910,.575,.900],.44,.050,.038,distant),
   buildBroadLeafGeometry([.720,.910,.185,.550],.48,.058,.043,distant)
- ];
- const fillGeometries=[
-  buildBroadLeafGeometry([.405,.600,.640,.965],.50,.060,.045,distant,true),
-  buildBroadLeafGeometry([.220,.410,.205,.580],.46,.052,.040,distant,true),
-  buildBroadLeafGeometry([.730,.910,.575,.900],.44,.050,.038,distant,true),
-  buildBroadLeafGeometry([.720,.910,.185,.550],.48,.058,.043,distant,true)
- ];
+  ];
+  // Preserve every leaf placement and the folded solid silhouette, but avoid
+  // spending near-field topology on leaves that are already only a few pixels.
+  const optimizedLeafGeometries=[
+   buildBroadLeafGeometry([.405,.600,.640,.965],.50,.060,.045,distant,distant?true:'mid'),
+   buildBroadLeafGeometry([.220,.410,.205,.580],.46,.052,.040,distant,distant?true:'mid'),
+   buildBroadLeafGeometry([.730,.910,.575,.900],.44,.050,.038,distant,distant?true:'mid'),
+   buildBroadLeafGeometry([.720,.910,.185,.550],.48,.058,.043,distant,distant?true:'mid')
+  ];
+  const fillGeometries=[
+   buildBroadLeafGeometry([.405,.600,.640,.965],.50,.060,.045,true,true,true),
+   buildBroadLeafGeometry([.220,.410,.205,.580],.46,.052,.040,true,true,true),
+   buildBroadLeafGeometry([.730,.910,.575,.900],.44,.050,.038,true,true,true),
+   buildBroadLeafGeometry([.720,.910,.185,.550],.48,.058,.043,true,true,true)
+  ];
  const density=new TreeCanopyDensity(world,trees,fillGeometries,material,distant);
  const leafSets=leafGeometries.map(()=>[]),r=random(distant?93417:93411),golden=2.399963229728653;
  const branchData={positions:[],uvs:[],colors:[],indices:[]},up=new T.Vector3(0,1,0),leafAxis=new T.Vector3(0,1,0);
@@ -1525,7 +1568,8 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
   }
  };
 
- trees.forEach((tree,treeIndex)=>{
+ for(let treeIndex=0;treeIndex<trees.length;treeIndex++){
+  const tree=trees[treeIndex];
   const h=tree.treeHeight??14;
   // Three deterministic crown grammars stop every trunk from wearing the same
   // procedural silhouette.  Roots and overall tree height stay untouched.
@@ -1692,9 +1736,13 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
    addLobe(treeIndex,50+a,center,outward,tangent,h*(distant?.060:.075)*(.92+r()*.22)*lobeScale,!distant&&(a<2&&treeIndex%2===0),archetype);
    addFoliageCloud(treeIndex,180+a,center,outward,tangent,h*(distant?.052:.072)*(.94+r()*.22)*lobeScale,distant?1.10:1.06);
   }
- });
+  if(treeIndex%4===3||treeIndex===trees.length-1){
+   const jobStart=world._loadingJobsCompleted??0,jobTotal=world._loadingJobsTotal??40,jobWeight=world._loadingJobWeight??1,fraction=.02+.10*(treeIndex+1)/trees.length,completed=jobStart+fraction*jobWeight;
+   await world.loadingCheckpoint('scene',Math.min(.955,.02+.92*completed/jobTotal),'Building forest detail',`${distant?'Distant':'Mature'} tree forms ${treeIndex+1} of ${trees.length}`,Math.round(completed),jobTotal);
+  }
+ }
 
- density.build();
+ await density.build();
 
  if(branchData.indices.length){
   const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(branchData.positions,3));g.setAttribute('uv',new T.Float32BufferAttribute(branchData.uvs,2));g.setAttribute('color',new T.Float32BufferAttribute(branchData.colors,3));g.setIndex(branchData.indices);g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere();
@@ -1704,10 +1752,24 @@ function plantBroadleafTreeCrowns(world,leafModel,trees,distant=false){
  // topology. Keep generating the placements to preserve the structural RNG,
  // but use the attached procedural blades (with the same tissue textures)
  // for tree crowns rather than rendering disconnected scan fragments.
- leafGeometries.forEach((geometry,i)=>{if(leafSets[i].length)instances(world,geometry,material,leafSets[i],`${distant?'Distant':'Mature'} curved broadleaf leaves v${i+1}`,!distant);});
+ for(let i=0;i<leafGeometries.length;i++){
+  const geometry=leafGeometries[i];
+  if(!leafSets[i].length)continue;
+  if(world.quality==='low')instances(world,fillGeometries[i],material,leafSets[i],`${distant?'Distant':'Mature'} curved broadleaf leaves v${i+1} low`,false);
+  else if(world.quality==='medium')instances(world,optimizedLeafGeometries[i],material,leafSets[i],`${distant?'Distant':'Mature'} curved broadleaf leaves v${i+1} medium`,!distant);
+  else if(distant)instances(world,optimizedLeafGeometries[i],material,leafSets[i],`Distant curved broadleaf leaves v${i+1}`,false);
+  else{
+  const near=[],far=[];
+  for(const placement of leafSets[i])((Math.hypot(placement.x,placement.z-2.65)<14)?near:far).push(placement);
+  if(near.length)instances(world,geometry,material,near,`Mature curved broadleaf leaves v${i+1} near`,true);
+  if(far.length)instances(world,optimizedLeafGeometries[i],material,far,`Mature curved broadleaf leaves v${i+1} optimized`,false);
+  }
+  const jobStart=world._loadingJobsCompleted??0,jobTotal=world._loadingJobsTotal??40,jobWeight=world._loadingJobWeight??1,fraction=.985+i*.003,completed=jobStart+fraction*jobWeight;
+  await world.loadingCheckpoint('scene',Math.min(.955,.02+.92*completed/jobTotal),'Building forest detail',`${distant?'Distant':'Mature'} leaf layer ${i+1} of ${leafGeometries.length}`,Math.round(completed),jobTotal);
+ }
 }
 
-export function plantPines(world,model,distant=false,leafModel=null,fullNeedleModel=null){
+export async function plantPines(world,model,distant=false,leafModel=null,fullNeedleModel=null){
  const box=new T.Box3().setFromObject(model),height=box.getSize(new T.Vector3()).y,sources=sourceMeshes(model),r=random(distant?81500:71032);
  const canopyPlacements=[],trunkPlacements=[];
  const deadWood=[[2.3,-1.5],[-3.6,2.8],[4.7,4.0],[-5.0,-5.4],[1.6,-7.8],[1.8,-.95],[4.2,3.8],[-4.7,-3.9]];
@@ -1763,7 +1825,7 @@ export function plantPines(world,model,distant=false,leafModel=null,fullNeedleMo
   // trees now receive their own bent/forking bole inside plantBroadleafTreeCrowns;
   // keep the old clean pine trunk only on the true conifer minority.
   const coniferTrunks=leafModel?trunkPlacements.filter((_,i)=>!isBroadleafIndex(i)):trunkPlacements;
-  plantBroadleafTreeCrowns(world,leafModel,broadleafCanopy,distant);
+  await plantBroadleafTreeCrowns(world,leafModel,broadleafCanopy,distant);
   for(const src of sources){
    const isDeadBranch=src.material.name.includes('dead_branches');
    const isCrownBark=src.material.name.includes('pine_tree_01_bark');
@@ -1872,7 +1934,7 @@ export async function loadForestDetails(world,gl,texture){
     layered:spec.layered??true
    }));
    const cleanOptions={...options};delete cleanOptions.visualIds;
-   plantModel(world,model.scene,{lodDistance:options.lodDistance||2.5,...cleanOptions,lodModel:lod.scene,visualFamilies});
+   await world.loadingJob(options.name,()=>plantModel(world,model.scene,{lodDistance:options.lodDistance||2.5,...cleanOptions,lodModel:lod.scene,visualFamilies}));
   };
   const wood=async()=>{
    for(const [id,positions]of [
@@ -1924,14 +1986,14 @@ export async function loadForestDetails(world,gl,texture){
      {model:broad03.scene,lodModel:broad03Lod.scene,weight:w3,lodDistance,label:'paired broadleaf',heightScale:cardHeightScale,widthScale:cardWidthScale,tiltScale:1.22},
      {model:broad04.scene,lodModel:broad04Lod.scene,weight:w4,lodDistance,label:'woody broadleaf',heightScale:cardHeightScale*.92,widthScale:cardWidthScale*1.02,tiltScale:1.28}
     ];
-    plantModel(world,full.scene,{name:'Conifer seedlings',seed:14502,count:200,radius:44,height:[.45,1.15],cluster:2.2,near:2.2,wind:.012,lodModel:medium.scene,lodDistance:18.0,primaryWeight:.24,visualFamilies:lowBroadleafFamilies(.38,.38,18.0,.66,.66),scatterChance:.45,shadow:false});
-    plantModel(world,full.scene,{name:'Conifer saplings',seed:28901,count:320,radius:48,minRadius:4.5,height:[1.30,2.50],cluster:2.8,near:3.6,wind:.010,lodModel:medium.scene,lodDistance:18.0,primaryWeight:.24,visualFamilies:lowBroadleafFamilies(.38,.38,20.0,.62,.62),scatterChance:.72,shadow:false});
-    plantModel(world,full.scene,{name:'Midground conifer saplings',seed:33412,count:120,minRadius:3.2,radius:15.0,midground:true,height:[1.10,2.15],cluster:2.2,near:3.2,wind:.010,lodModel:medium.scene,lodDistance:20.0,primaryWeight:.22,visualFamilies:lowBroadleafFamilies(.39,.39,20.0,.62,.62),scatterChance:.65,shadow:false});
-    plantModel(world,medium.scene,{name:'Young firs',seed:22281,count:240,radius:50,minRadius:5.5,height:[2.20,4.40],cluster:3.0,near:3.8,wind:.009,lodModel:far.scene,lodDistance:18.0,primaryWeight:.24,visualFamilies:lowBroadleafFamilies(.38,.38,18.0,.56,.50),scatterChance:.70});
-    plantModel(world,medium.scene,{name:'Midground young firs',seed:44198,count:90,minRadius:3.6,radius:16.0,midground:true,height:[1.90,3.80],cluster:2.2,near:3.4,wind:.009,lodModel:far.scene,lodDistance:18.0,primaryWeight:.22,visualFamilies:lowBroadleafFamilies(.39,.39,18.0,.56,.50),scatterChance:.65});
-    plantModel(world,medium.scene,{name:'Wooded slope firs',seed:67812,count:190,radius:50,height:[3.60,7.20],cluster:2.6,near:4.2,belt:true,wind:.006,lodModel:far.scene,lodDistance:20.0,primaryWeight:.22,visualFamilies:lowBroadleafFamilies(.39,.39,20.0,.46,.38),scatterChance:.35,shadow:false});
+    await world.loadingJob('Conifer seedlings',()=>plantModel(world,full.scene,{name:'Conifer seedlings',seed:14502,count:200,radius:44,height:[.45,1.15],cluster:2.2,near:2.2,wind:.012,lodModel:medium.scene,lodDistance:18.0,primaryWeight:.24,visualFamilies:lowBroadleafFamilies(.38,.38,18.0,.66,.66),scatterChance:.45,shadow:false}));
+    await world.loadingJob('Conifer saplings',()=>plantModel(world,full.scene,{name:'Conifer saplings',seed:28901,count:320,radius:48,minRadius:4.5,height:[1.30,2.50],cluster:2.8,near:3.6,wind:.010,lodModel:medium.scene,lodDistance:18.0,primaryWeight:.24,visualFamilies:lowBroadleafFamilies(.38,.38,20.0,.62,.62),scatterChance:.72,shadow:false}));
+    await world.loadingJob('Midground conifer saplings',()=>plantModel(world,full.scene,{name:'Midground conifer saplings',seed:33412,count:120,minRadius:3.2,radius:15.0,midground:true,height:[1.10,2.15],cluster:2.2,near:3.2,wind:.010,lodModel:medium.scene,lodDistance:20.0,primaryWeight:.22,visualFamilies:lowBroadleafFamilies(.39,.39,20.0,.62,.62),scatterChance:.65,shadow:false}));
+    await world.loadingJob('Young firs',()=>plantModel(world,medium.scene,{name:'Young firs',seed:22281,count:240,radius:50,minRadius:5.5,height:[2.20,4.40],cluster:3.0,near:3.8,wind:.009,lodModel:far.scene,lodDistance:18.0,primaryWeight:.24,visualFamilies:lowBroadleafFamilies(.38,.38,18.0,.56,.50),scatterChance:.70}));
+    await world.loadingJob('Midground young firs',()=>plantModel(world,medium.scene,{name:'Midground young firs',seed:44198,count:90,minRadius:3.6,radius:16.0,midground:true,height:[1.90,3.80],cluster:2.2,near:3.4,wind:.009,lodModel:far.scene,lodDistance:18.0,primaryWeight:.22,visualFamilies:lowBroadleafFamilies(.39,.39,18.0,.56,.50),scatterChance:.65}));
+    await world.loadingJob('Wooded slope firs',()=>plantModel(world,medium.scene,{name:'Wooded slope firs',seed:67812,count:190,radius:50,height:[3.60,7.20],cluster:2.6,near:4.2,belt:true,wind:.006,lodModel:far.scene,lodDistance:20.0,primaryWeight:.22,visualFamilies:lowBroadleafFamilies(.39,.39,20.0,.46,.38),scatterChance:.35,shadow:false}));
    })(),
-   (async()=>{const [model,fullNeedles,leafAsset]=await Promise.all([gl.loadAsync('./assets/pine_distant.glb'),gl.loadAsync('./assets/pine.glb'),world.treeLeafReady,world.pineBarkReady,...world.foliageAlphaReady]);plantPines(world,model.scene,true,leafAsset?.scene??null,fullNeedles.scene);})()
+   (async()=>{const [model,fullNeedles,leafAsset]=await Promise.all([gl.loadAsync('./assets/pine_distant.glb'),gl.loadAsync('./assets/pine.glb'),world.treeLeafReady,world.pineBarkReady,...world.foliageAlphaReady]);await world.loadingJob('Distant pine forest',()=>plantPines(world,model.scene,true,leafAsset?.scene??null,fullNeedles.scene));})()
   ]);
  }
 

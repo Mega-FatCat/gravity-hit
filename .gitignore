@@ -1,0 +1,35 @@
+# Dependencies & package caches
+node_modules/
+npm-cache/
+.npm/
+
+# Build & packaging outputs (GitHub Actions builds web release; portable exe is generated locally)
+work/game/dist/
+dist/
+outputs/
+work/checkpoints/
+
+# Local runtime & test data (avoids multi-gigabyte test dumps in Git)
+portable-data/
+work/qa-data/
+work/qa/
+work/game/qa/
+qa-data/
+*.log
+
+# Raw uncompressed source assets (runtime uses optimized assets in work/game/public/assets)
+work/raw/
+
+# Backup & scratch files
+*.blend1
+*.gh27
+*.orig
+work/game/manual_render.png
+work/game/test_screen*.png
+work/commit_msg.txt
+
+# System & IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

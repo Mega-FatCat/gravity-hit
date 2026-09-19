@@ -1,0 +1,11 @@
+{
+  "metrics": {
+    "fps": 55.902357216062626,
+    "p95ms": 16.799999999999272,
+    "triangles": 15892870,
+    "calls": 345,
+    "assets": [],
+    "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 (0x00002484) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+  },
+  "errors": []
+}

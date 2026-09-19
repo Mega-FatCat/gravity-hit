@@ -14,7 +14,7 @@ function advanceTime(sim, seconds, input = {}) {
   }
 }
 
-test('GH-04: visible but controlled initial generation, responsive middle, natural late slowing', () => {
+test('GH-04: full contact converts water loss into the requested gradual bowl and smoke progress', () => {
   const s = ready();
   s.mode = 'ignite';
   s.angle = 45;
@@ -22,31 +22,15 @@ test('GH-04: visible but controlled initial generation, responsive middle, natur
   assert.equal(s.smoke, 0);
   assert.equal(s.smokeDensity, 0);
 
-  // Early generation: t = 1.0s
-  advanceTime(s, 1.0, {fire: true, aim: 1});
-  const earlySmoke = s.smoke;
-  const earlyDensity = s.smokeDensity;
-  assert.ok(earlySmoke > 0.015, 'early smoke should be visible');
-  assert.ok(earlySmoke < 0.08, 'early smoke should be controlled, not explosive');
-  assert.ok(earlyDensity > 0.10 && earlyDensity < 0.45, 'early density should be controlled');
+  while(s.water>.75) s.step(1/60,{fire:true,aim:1});
+  assert.ok(Math.abs(s.bud-.5)<.015, `25% water release should leave half the bowl, got ${s.bud}`);
+  assert.ok(Math.abs(s.smoke-.5)<.015, `25% water release should produce half the smoke load, got ${s.smoke}`);
+  assert.ok(s.smoke>1-s.water, 'half a charge may be compressed into the smaller headspace');
+  assert.ok(s.smokeDensity>.95, 'compressed smoke should read as optically dense');
 
-  // Mid generation: t = 4.5s
-   advanceTime(s, 3.5, {fire: true, aim: 1});
-  const midSmoke = s.smoke;
-  const midDensity = s.smokeDensity;
-  assert.ok(midSmoke > 0.35, 'mid smoke should be responsive (>0.35)');
-  assert.ok(midSmoke - earlySmoke > 0.30, 'middle section should have substantial responsive increase');
-  assert.ok(midDensity > 0.70, 'mid density should be rich and visible');
-
-  // Late generation: t = 8.0s
-  advanceTime(s, 3.5, {fire: true, aim: 1});
-  const lateSmoke = s.smoke;
-  const lateDensity = s.smokeDensity;
-  assert.ok(lateSmoke > 0.60, 'late smoke should be near full capacity (>0.60)');
-  const midRate = (midSmoke - earlySmoke) / 3.5;
-  const lateRate = (lateSmoke - midSmoke) / 3.5;
-  assert.ok(lateRate < midRate, 'generation should naturally slow as headspace decreases');
-  assert.ok(lateSmoke <= 1 - s.water, 'smoke volume cannot exceed headspace');
+  while(s.water>.5) s.step(1/60,{fire:true,aim:1});
+  assert.ok(s.bud<.015, `50% water release should finish the bowl, got ${s.bud}`);
+  assert.ok(s.smoke>.985, `50% water release should produce the full smoke load, got ${s.smoke}`);
 });
 
 test('GH-04: heating response distinguishes weak, normal, and strong heating', () => {
@@ -73,6 +57,14 @@ test('GH-04: heating response distinguishes weak, normal, and strong heating', (
   assert.ok(strong.mid.smoke > weak.mid.smoke);
   assert.ok(strong.late.smoke >= normal.late.smoke);
   assert.ok(normal.late.smoke >= weak.late.smoke);
+});
+
+test('GH-04: partial flame contact scales combustion linearly', () => {
+  const half = ready();
+  half.mode = 'ignite';
+  while (half.water > .5) half.step(1 / 60, {fire: true, aim: .5});
+  assert.ok(Math.abs(half.bud - .5) < .02, `half contact should burn half the bowl over 50% water release, got ${half.bud}`);
+  assert.ok(Math.abs(half.smoke - .5) < .02, `half contact should produce half smoke load, got ${half.smoke}`);
 });
 
 test('GH-04: drain-driven airflow stokes glowing embers even when flame is removed', () => {
@@ -117,5 +109,5 @@ test('GH-04: physical causality invariants preserved', () => {
   full.mode = 'ignite';
   full.angle = 45;
   advanceTime(full, 12.0, {fire: true, aim: 1});
-  assert.ok(full.smoke <= 1 - full.water);
+  assert.ok(full.smoke <= 1);
 });

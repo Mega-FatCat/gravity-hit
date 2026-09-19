@@ -19,16 +19,23 @@ export class TreeCanopyDensity {
  bough(start,mid,end,treeIndex){const path=[start.clone(),mid.clone(),end.clone()];this.boughs.push(path);this.crowns[treeIndex].boughs.push(path);}
  shoot(start,end,radius=.005){if(start.distanceToSquared(end)>1e-10)this.shoots.push([start.clone(),end.clone(),radius]);}
  cloudLeaf(treeIndex,placement){this.crowns[treeIndex].cloudLeaves.push(placement);}
- build(){
+ async build(){
   const {world,trees,geometries,material,distant,crowns,twigs,boughs}=this;
   const seed=distant?327913:327901,golden=2.399963229728653;
+  const jobStart=world._loadingJobsCompleted??0,jobTotal=world._loadingJobsTotal??40,jobWeight=world._loadingJobWeight??1;
+  const checkpoint=async(progress,detail)=>{
+   const completed=jobStart+T.MathUtils.clamp(progress,0,1)*jobWeight;
+   const overall=Math.min(.955,.02+.92*completed/jobTotal);
+   await world.loadingCheckpoint('scene',overall,'Building forest detail',detail,Math.round(completed),jobTotal);
+  };
   const rand=(key,channel)=>{
    let v=(seed+Math.imul(key,0x9e3779b1)+Math.imul(channel+1,0x85ebca6b))|0;
    v^=v>>>16;v=Math.imul(v,0x7feb352d);v^=v>>>15;v=Math.imul(v,0x846ca68b);v^=v>>>16;
    return(v>>>0)/4294967296;
   };
   // Preserve real woody support while allowing foliage to occupy crown depth.
-  for(const crown of crowns){
+  for(let crownIndex=0;crownIndex<crowns.length;crownIndex++){
+   const crown=crowns[crownIndex];
    const {tree}=crown,h=tree.treeHeight??14;
    // Some original lobe roots were offset from their parent bough. Close
    // that physical gap before attaching the foliage's smaller side shoots.
@@ -58,8 +65,9 @@ export class TreeCanopyDensity {
     leaf.x=blade.x;leaf.y=blade.y;leaf.z=blade.z;
    }
    // Same physical leaves on tall trees need proportionally more coverage.
-   crown.count=Math.round(T.MathUtils.clamp(h*h*(distant?130:110),distant?35000:29000,distant?67000:54000));
-
+   const fillScale=world.profile?.canopyFillScale??1;
+   crown.count=Math.round(T.MathUtils.clamp(h*h*(distant?130:110),distant?35000:29000,distant?67000:54000)*fillScale);
+   if(crownIndex%4===3||crownIndex===crowns.length-1)await checkpoint(.06+.08*(crownIndex+1)/crowns.length,`${distant?'Distant':'Mature'} crown supports ${crownIndex+1} of ${crowns.length}`);
   }
   const pos=new T.Vector3(),axis=new T.Vector3(),side=new T.Vector3(),across=new T.Vector3(),radial=new T.Vector3(),direction=new T.Vector3(),up=new T.Vector3(0,1,0);
   const orient=(dx,dy,dz)=>{
@@ -67,7 +75,8 @@ export class TreeCanopyDensity {
    if(side.lengthSq()<1e-6)side.set(1,0,0);else side.normalize();
    across.crossVectors(axis,side).normalize();
   };
-  const generate=(emit)=>{
+  const generate=async(emit,phase,start,span)=>{
+   const crownYieldEvery=distant?3:2;
    for(let ti=0;ti<crowns.length;ti++){
     const c=crowns[ti];
     for(let i=0;i<c.count;i++){
@@ -89,8 +98,9 @@ export class TreeCanopyDensity {
      // Branching sprays occupy volume; short petioles connect every blade
      // without long naked rays or forty leaves packed onto one straight line.
      emit(key,pos,direction,rand(key,5)*Math.PI*2,start);
+     }
+    if(ti%crownYieldEvery===crownYieldEvery-1||ti===crowns.length-1)await checkpoint(start+span*.78*(ti+1)/crowns.length,`${phase}: crowns ${ti+1} of ${crowns.length}`);
     }
-   }
    // Every exposed upper twig needs continuous foliage up to its endpoint.
    // Limiting this to lobes tagged 'top' left other upward-facing twigs with
    // a terminal rosette separated from the crown by a subpixel bare stem.
@@ -108,36 +118,41 @@ export class TreeCanopyDensity {
      pos.addScaledVector(radial,radius);
      direction.copy(axis).multiplyScalar(.40).addScaledVector(radial,.60).addScaledVector(up,.18).normalize();
      emit(key,pos,direction,phi);
+     }
+    if(ai%192===191||ai===twigs.length-1)await checkpoint(start+span*(.78+.10*(ai+1)/twigs.length),`${phase}: outer twigs ${ai+1} of ${twigs.length}`);
     }
-   }
    // Living boughs carry overlapping leaf groups, with depth variation so
    // projecting one leaf across another cannot make coplanar z-fighting.
-   for(let bi=0;bi<boughs.length;bi++)for(let part=0;part<2;part++){
-    const a=boughs[bi][part],b=boughs[bi][part+1],length=a.distanceTo(b),steps=Math.ceil(length/.26);
-    orient(b.x-a.x,b.y-a.y,b.z-a.z);
-    for(let i=0;i<steps;i++){
-     const shootKey=0x20000000+bi*8192+part*4096+i*24,phi=i*golden+rand(shootKey,1);
-     radial.copy(side).multiplyScalar(Math.cos(phi)).addScaledVector(across,Math.sin(phi));
-     const start=a.clone().lerp(b,(i+.5)/steps),reach=.22+rand(shootKey,2)*.38;
-     const end=start.clone().addScaledVector(radial,reach).addScaledVector(axis,reach*.35);
-     if(emit.recordShoots)this.shoot(start,end);
-     for(let leaf=0;leaf<24;leaf++){
-      const key=shootKey+leaf;
-      pos.copy(start).lerp(end,(leaf+.5)/24);
-      direction.copy(radial).multiplyScalar(.3).addScaledVector(side,Math.cos(leaf*golden)*.6).addScaledVector(across,Math.sin(leaf*golden)*.6).addScaledVector(up,.25).normalize();
-      emit(key,pos,direction,phi+leaf*golden);
+   for(let bi=0;bi<boughs.length;bi++){
+    for(let part=0;part<2;part++){
+     const a=boughs[bi][part],b=boughs[bi][part+1],length=a.distanceTo(b),steps=Math.ceil(length/.26);
+     orient(b.x-a.x,b.y-a.y,b.z-a.z);
+     for(let i=0;i<steps;i++){
+      const shootKey=0x20000000+bi*8192+part*4096+i*24,phi=i*golden+rand(shootKey,1);
+      radial.copy(side).multiplyScalar(Math.cos(phi)).addScaledVector(across,Math.sin(phi));
+      const start=a.clone().lerp(b,(i+.5)/steps),reach=.22+rand(shootKey,2)*.38;
+      const end=start.clone().addScaledVector(radial,reach).addScaledVector(axis,reach*.35);
+      if(emit.recordShoots)this.shoot(start,end);
+      for(let leaf=0;leaf<24;leaf++){
+       const key=shootKey+leaf;
+       pos.copy(start).lerp(end,(leaf+.5)/24);
+       direction.copy(radial).multiplyScalar(.3).addScaledVector(side,Math.cos(leaf*golden)*.6).addScaledVector(across,Math.sin(leaf*golden)*.6).addScaledVector(up,.25).normalize();
+       emit(key,pos,direction,phi+leaf*golden);
+      }
      }
     }
+    if(bi%128===127||bi===boughs.length-1)await checkpoint(start+span*(.88+.12*(bi+1)/boughs.length),`${phase}: living boughs ${bi+1} of ${boughs.length}`);
    }
-  };
-  const buckets=new Map(),tile=p=>Math.floor(p.x/8)*1024+Math.floor(p.z/8)+524800;
+   };
+  const tileSize=distant?12:8;
+  const buckets=new Map(),tile=p=>Math.floor(p.x/tileSize)*1024+Math.floor(p.z/tileSize)+524800;
   const countLeaves=(key,p)=>{
    const id=tile(p);let bucket=buckets.get(id);
-   if(!bucket){bucket={x:Math.floor(p.x/8),z:Math.floor(p.z/8),counts:[0,0,0,0],meshes:[],shadow:false};buckets.set(id,bucket);}
+   if(!bucket){bucket={x:Math.floor(p.x/tileSize),z:Math.floor(p.z/tileSize),counts:[0,0,0,0],meshes:[],shadow:false};buckets.set(id,bucket);}
    bucket.counts[key&3]++;
-   bucket.shadow ||= !distant&&Math.hypot(p.x,p.z-.8)<12;
+   bucket.shadow ||= !distant&&Math.hypot(p.x,p.z-.8)<(world.profile?.shadowCasterDistance??12);
   };
-  countLeaves.recordShoots=true;generate(countLeaves);
+  countLeaves.recordShoots=true;await generate(countLeaves,`${distant?'Distant':'Mature'} canopy allocation`,.15,.31);
   const connectedMaterial=material.clone(),oldCompile=material.onBeforeCompile,oldKey=material.customProgramCacheKey.bind(material);
   const attachShader=shader=>{shader.vertexShader='attribute vec3 leafAnchor;\nattribute float leafRoot;\n'+shader.vertexShader;shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\ntransformed += leafAnchor * leafRoot;');};
   connectedMaterial.onBeforeCompile=function(shader,...args){oldCompile.call(this,shader,...args);attachShader(shader);};
@@ -154,7 +169,7 @@ export class TreeCanopyDensity {
    bucket.meshes[v]={mesh,index:0};
   }
   const object=new T.Object3D(),roll=new T.Quaternion(),color=new T.Color();
-  generate((key,p,dir,angle,anchor)=>{
+  await generate((key,p,dir,angle,anchor)=>{
    const entry=buckets.get(tile(p)).meshes[key&3],size=(distant?.105:.088)+rand(key,6)*(distant?.05:.064);
    object.position.copy(p);object.quaternion.setFromUnitVectors(up,dir);roll.setFromAxisAngle(dir,angle);object.quaternion.premultiply(roll);
    object.scale.set(size*(1.10+rand(key,7)*.12),size,size);object.updateMatrix();
@@ -162,24 +177,38 @@ export class TreeCanopyDensity {
    color.setRGB(tint,tint*(.92+rand(key,9)*.055),tint*(.70+rand(key,10)*.075));
    if(anchor){const local=anchor.clone().sub(p).applyQuaternion(object.quaternion.clone().invert()).divide(object.scale);entry.mesh.geometry.attributes.leafAnchor.setXYZ(entry.index,local.x,local.y,local.z);}
    entry.mesh.setMatrixAt(entry.index,object.matrix);entry.mesh.setColorAt(entry.index++,color);
-  });
+  },`${distant?'Distant':'Mature'} canopy population`,.48,.37);
   if(this.shoots.length){
    // Open ends sit inside the parent twig/blade. Spatial batches avoid
    // transforming every supporting shoot in the forest for every view.
    const geometry=new T.CylinderGeometry(.0025,.005,1,3,1,true),stemMaterial=new T.MeshStandardMaterial({color:0x494d28,roughness:.96});
    const stemBuckets=new Map(),stemKey=a=>Math.floor(a.x/12)*1024+Math.floor(a.z/12)+524800;
-   for(const [a] of this.shoots){const key=stemKey(a),bucket=stemBuckets.get(key)??{count:0,index:0};bucket.count++;stemBuckets.set(key,bucket);}
-   for(const [key,bucket] of stemBuckets){bucket.mesh=new T.InstancedMesh(geometry,stemMaterial,bucket.count);bucket.mesh.name=`${distant?'Distant':'Mature'} attached leaf shoots:${key}`;}
-   for(const [a,b,radius] of this.shoots){
-    const bucket=stemBuckets.get(stemKey(a));object.position.copy(a).lerp(b,.5);direction.subVectors(b,a);object.quaternion.setFromUnitVectors(up,direction.clone().normalize());object.scale.set(radius/.005,direction.length(),radius/.005);object.updateMatrix();bucket.mesh.setMatrixAt(bucket.index++,object.matrix);
+   for(let shootIndex=0;shootIndex<this.shoots.length;shootIndex++){
+    const [a]=this.shoots[shootIndex],key=stemKey(a),bucket=stemBuckets.get(key)??{count:0,index:0};bucket.count++;stemBuckets.set(key,bucket);
+    if(shootIndex%8192===8191||shootIndex===this.shoots.length-1)await checkpoint(.86+.035*(shootIndex+1)/this.shoots.length,`${distant?'Distant':'Mature'} branch supports ${shootIndex+1} of ${this.shoots.length}`);
    }
-   for(const {mesh} of stemBuckets.values()){mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();world.scene.add(mesh);}
+   for(const [key,bucket] of stemBuckets){bucket.mesh=new T.InstancedMesh(geometry,stemMaterial,bucket.count);bucket.mesh.name=`${distant?'Distant':'Mature'} attached leaf shoots:${key}`;}
+   for(let shootIndex=0;shootIndex<this.shoots.length;shootIndex++){
+    const [a,b,radius]=this.shoots[shootIndex];
+    const bucket=stemBuckets.get(stemKey(a));object.position.copy(a).lerp(b,.5);direction.subVectors(b,a);object.quaternion.setFromUnitVectors(up,direction.clone().normalize());object.scale.set(radius/.005,direction.length(),radius/.005);object.updateMatrix();bucket.mesh.setMatrixAt(bucket.index++,object.matrix);
+    if(shootIndex%8192===8191||shootIndex===this.shoots.length-1)await checkpoint(.895+.055*(shootIndex+1)/this.shoots.length,`${distant?'Distant':'Mature'} branch geometry ${shootIndex+1} of ${this.shoots.length}`);
+   }
+   const stemEntries=[...stemBuckets.values()];
+   for(let bucketIndex=0;bucketIndex<stemEntries.length;bucketIndex++){
+    const {mesh}=stemEntries[bucketIndex];mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();world.scene.add(mesh);
+    if(bucketIndex%8===7||bucketIndex===stemEntries.length-1)await checkpoint(.95+.02*(bucketIndex+1)/stemEntries.length,`${distant?'Distant':'Mature'} branch batches ${bucketIndex+1} of ${stemEntries.length}`);
+   }
   }
   let leaves=0;
-  for(const bucket of buckets.values())for(const entry of bucket.meshes)if(entry){
-   const mesh=entry.mesh;leaves+=mesh.count;
-   mesh.instanceMatrix.needsUpdate=true;mesh.instanceColor.needsUpdate=true;mesh.computeBoundingBox();mesh.boundingBox.expandByScalar(.30);mesh.computeBoundingSphere();mesh.boundingSphere.radius+=.30;world.scene.add(mesh);
+  const leafBuckets=[...buckets.values()];
+  for(let bucketIndex=0;bucketIndex<leafBuckets.length;bucketIndex++){
+   for(const entry of leafBuckets[bucketIndex].meshes)if(entry){
+    const mesh=entry.mesh;leaves+=mesh.count;
+    mesh.instanceMatrix.needsUpdate=true;mesh.instanceColor.needsUpdate=true;mesh.computeBoundingBox();mesh.boundingBox.expandByScalar(.30);mesh.computeBoundingSphere();mesh.boundingSphere.radius+=.30;world.scene.add(mesh);
+   }
+   if(bucketIndex%8===7||bucketIndex===leafBuckets.length-1)await checkpoint(.97+.01*(bucketIndex+1)/leafBuckets.length,`${distant?'Distant':'Mature'} leaf batches ${bucketIndex+1} of ${leafBuckets.length}`);
   }
   world.environmentCounts??={};world.environmentCounts[distant?'Added distant tree leaves':'Added mature tree leaves']=leaves;
+  await checkpoint(.98,`${distant?'Distant':'Mature'} canopy ready`);
  }
 }

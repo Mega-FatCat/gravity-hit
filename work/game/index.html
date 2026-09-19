@@ -1,1 +1,26 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob: ws://127.0.0.1:5173; worker-src 'self' blob:;"><title>ZNICZ</title></head><body><div id="app"></div><script type="module" src="/src/main.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob: ws: wss:; worker-src 'self' blob:;">
+  <title>ZNICZ (Beta 1) — A Forest Ritual</title>
+  <meta name="description" content="ZNICZ (Beta 1) — A quiet, meditative first-person simulation of an authentic waterfall gravity ritual in a photorealistic conifer forest.">
+  <meta property="og:title" content="ZNICZ (Beta 1) — A Forest Ritual">
+  <meta property="og:description" content="A quiet, meditative first-person simulation of an authentic waterfall gravity ritual in a photorealistic conifer forest.">
+  <meta property="og:type" content="website">
+  <style>
+    html,body,#app{margin:0;width:100%;height:100%;background:#151b16;color:#f0efe6;font-family:'Segoe UI',sans-serif}
+    .boot-shell{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(circle at 50% 35%,#26352a,#101711 72%)}
+    .boot-mark{width:min(420px,76vw)}
+    .boot-brand{font-size:14px;letter-spacing:5px}.boot-brand small{display:block;margin-top:8px;font-size:9px;letter-spacing:2.6px;opacity:.55}
+    .boot-status{margin-top:34px;font-size:10px;letter-spacing:1.6px;color:#b8c5ab}
+    .boot-line{height:2px;margin-top:12px;background:#93a88644;overflow:hidden}.boot-line:after{content:'';display:block;width:24%;height:100%;background:#d3e2b5;animation:boot 1.3s ease-in-out infinite}
+    @keyframes boot{0%{transform:translateX(-110%)}100%{transform:translateX(430%)}}
+  </style>
+</head>
+<body>
+  <div id="app"><div class="boot-shell"><div class="boot-mark"><div class="boot-brand">ZNICZ<small>A FOREST RITUAL</small></div><div class="boot-status">WAKING THE FOREST</div><div class="boot-line"></div></div></div></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

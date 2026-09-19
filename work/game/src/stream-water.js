@@ -4,18 +4,19 @@ import {Water} from 'three/addons/objects/Water.js';
 // GH-38: keep the existing channel and picking mesh. The optical surface owns
 // its animation and compositing; no streambed material or geometry is changed.
 export function createStreamWater(world, geometry, normalTexture, level) {
- const water=new Water(geometry,{textureWidth:1024,textureHeight:1024,
+ const profile=world.profile;
+ const water=new Water(geometry,{textureWidth:profile.waterReflectionSize,textureHeight:profile.waterReflectionSize,
   waterNormals:normalTexture,sunDirection:world.sun.position.clone().normalize(),
   sunColor:0xffeed0,waterColor:0x52604a,alpha:1,distortionScale:.07,fog:true});
  water.rotation.x=-Math.PI/2;water.position.y=level;water.name='stream';
  water.renderOrder=-1;water.material.transparent=true;water.material.depthWrite=false;
  water.receiveShadow=true;
  const m=water.material;
- const transmission=new T.WebGLRenderTarget(1,1,{type:T.HalfFloatType,depthBuffer:true,samples:4});
+ const transmission=new T.WebGLRenderTarget(1,1,{type:T.HalfFloatType,depthBuffer:true,samples:profile.waterMsaaSamples});
  transmission.depthTexture=new T.DepthTexture(1,1,T.UnsignedIntType);
  const composite=transmission.clone();
  // GH-39: the copy is resolved, but the water drawn AFTER it still needs MSAA.
- composite.samples=4;
+ composite.samples=profile.waterMsaaSamples;
  composite.depthTexture=new T.DepthTexture(1,1,T.UnsignedIntType);
  Object.assign(m.uniforms,{
   bedColor:{value:transmission.texture},bedDepth:{value:transmission.depthTexture},
@@ -165,10 +166,27 @@ export function createStreamWater(world, geometry, normalTexture, level) {
   const transparent=[],opaque=[],layers=new Map();
   try {
    renderer.info.autoReset=false;renderer.info.reset();
-   if(waterInFrustum)reflect.call(water,renderer,scene,camera);
-   renderer.getDrawingBufferSize(size);m.uniforms.resolution.value.copy(size);
+   // The mirror does not need glass props, smoke or pollen. Leaving them active
+   // made Three run a nested transmission prepass which redrew the entire
+   // opaque forest just to produce the small, blurred stream reflection.
+   const reflectionHidden=[];
+   if(waterInFrustum){
+    scene.traverse(o=>{if(o!==water&&o.visible&&(o.isMesh||o.isPoints||o.isLine)){
+     const materials=Array.isArray(o.material)?o.material:[o.material];
+     const name=o.name||'';
+     const detail=world.profile?.reflectionDetail??'full';
+     const transparent=materials.some(x=>x?.transparent||x?.transmission>0);
+     const micro=/^Forest floor|^Streambed Class (?:2b.*Far|3|3b|4|5)|attached leaf shoots|Individual forest dust/i.test(name);
+     const undergrowth=/(?:fern|grass|understory|sapling|heath|bush|thicket|seedhead)/i.test(name);
+     const omit=transparent||(detail==='balanced'&&micro)||(detail==='essential'&&(micro||undergrowth))||(detail==='minimal'&&(micro||undergrowth||/curved broadleaf leaves/i.test(name)));
+     if(omit){reflectionHidden.push([o,o.layers.mask]);o.layers.mask=0;}
+    }});
+    try{reflect.call(water,renderer,scene,camera);}finally{for(const [o,mask]of reflectionHidden)o.layers.mask=mask;}
+   }
+   renderer.getDrawingBufferSize(size);
    m.uniforms.cameraRange.value.set(camera.near,camera.far);
-   const w=size.x,h=size.y;
+   const scale=world.profile?.waterSceneScale??1,w=Math.max(1,Math.floor(size.x*scale)),h=Math.max(1,Math.floor(size.y*scale));
+   m.uniforms.resolution.value.set(w,h);
    if(transmission.width!==w||transmission.height!==h){transmission.setSize(w,h);composite.setSize(w,h);}
    scene.traverse(o=>{if(o.visible&&(o.isMesh||o.isPoints||o.isLine)){
     layers.set(o,o.layers.mask);

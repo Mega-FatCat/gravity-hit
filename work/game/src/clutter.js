@@ -1162,11 +1162,9 @@ export async function buildForestClutter(world, texture, gl, {infillOnly = false
   // 1. Load PBR Scots pine bark textures for realistic branches and bark flakes
   let stickMat, barkFlakeMat;
   try {
-    const [pineBarkDiff, pineBarkNor, pineBarkRough] = await Promise.all([
-      texture('pine_bark_4k/pine_bark_diff_4k.jpg', true, 1),
-      texture('pine_bark_4k/pine_bark_nor_gl_4k.jpg', false, 1),
-      texture('pine_bark_4k/pine_bark_rough_4k.jpg', false, 1)
-    ]);
+    const bark = await world.pineBarkReady;
+    if (!bark) throw new Error('Tiered bark texture unavailable');
+    const {map: pineBarkDiff, normalMap: pineBarkNor, roughnessMap: pineBarkRough} = bark;
     pineBarkDiff.wrapS = pineBarkDiff.wrapT = T.RepeatWrapping;
     pineBarkNor.wrapS = pineBarkNor.wrapT = T.RepeatWrapping;
     pineBarkRough.wrapS = pineBarkRough.wrapT = T.RepeatWrapping;
@@ -1292,17 +1290,19 @@ export async function buildForestClutter(world, texture, gl, {infillOnly = false
   const placements = generateClutterPlacements({ seed: 91402, infillOnly });
 
   function createInstancedBatch(geometry, material, list, name, shadow = false) {
-    if (!list.length) return null;
-    const mesh = new T.InstancedMesh(geometry, material, list.length);
+    const density = world.profile?.clutterDensityScale ?? 1;
+    const renderList = density >= .999 ? list : list.filter((_, i) => ((Math.imul(i + 1, 2654435761) >>> 0) / 4294967296) < density);
+    if (!renderList.length) return null;
+    const mesh = new T.InstancedMesh(geometry, material, renderList.length);
     mesh.name = name;
-    mesh.castShadow = shadow;
+    mesh.castShadow = shadow && (world.profile?.clutterShadows ?? true);
     mesh.receiveShadow = true;
     mesh.userData = { noPick: true, pickable: false };
 
     const dummy = new T.Object3D();
     const color = new T.Color();
 
-    list.forEach((p, i) => {
+    renderList.forEach((p, i) => {
       dummy.position.set(p.x, p.y, p.z);
       if (p.quaternion) {
         dummy.quaternion.copy(p.quaternion);
@@ -1344,7 +1344,7 @@ export async function buildForestClutter(world, texture, gl, {infillOnly = false
     try {
       const branchModel = (await gl.loadAsync('./assets/dry_branches_medium_01/dry_branches_medium_01.gltf')).scene;
       const branchSources = sourceMeshes(branchModel);
-      branchSources.forEach((src, i) => {
+      await world.loadingJob('Scanned fallen branches',()=>branchSources.forEach((src, i) => {
         const g = infillOnly ? restingScanGeometry(src, true) : groundedGeometry(src);
         const m = scanMaterial(src.material, world);
         const sz = g.boundingBox.getSize(new T.Vector3());
@@ -1357,7 +1357,7 @@ export async function buildForestClutter(world, texture, gl, {infillOnly = false
           }));
           createInstancedBatch(g, m, scaledPlacements, `Forest floor • Photogrammetry branch ${i + 1}`, true);
         }
-      });
+      }));
     } catch {
       // Graceful fallback to procedural sticks
     }
@@ -1368,7 +1368,7 @@ export async function buildForestClutter(world, texture, gl, {infillOnly = false
   if (gl && placements.groundRocks.length) {
     const model = (await gl.loadAsync('./assets/rock_moss_set_01/rock_moss_set_01.gltf')).scene;
     const sources = sourceMeshes(model);
-    sources.forEach((src, i) => {
+    await world.loadingJob('Scanned forest-floor rocks',()=>sources.forEach((src, i) => {
       const geometry = restingScanGeometry(src);
       const extent = geometry.boundingBox.getSize(new T.Vector3());
       const width = Math.max(extent.x, extent.z);
@@ -1381,7 +1381,7 @@ export async function buildForestClutter(world, texture, gl, {infillOnly = false
         return {...p, s, y: p.y - Math.min(extent.y * s * 0.24, 0.12)};
       });
       createInstancedBatch(geometry, material, list, `Forest floor • Scanned ground rock ${i + 1}`, true);
-    });
+    }));
   }
 
   // 7. Procedural Clutter Batches.  Three geometry families keep repeated
@@ -1396,19 +1396,23 @@ export async function buildForestClutter(world, texture, gl, {infillOnly = false
     createForkTwigGeometry({ seed: 6397, stemLength: 0.31, forkLength: 0.13, radiusStem: 0.0125, radiusFork: 0.0075 }),
     createForkTwigGeometry({ seed: 6469, stemLength: 0.25, forkLength: 0.18, radiusStem: 0.0155, radiusFork: 0.0095 })
   ];
-  stickFamilies.forEach((geometry, i) => {
+  await world.loadingJob('Weathered ground sticks',()=>stickFamilies.forEach((geometry, i) => {
     const subset = placements.sticks.filter((_, j) => j % stickFamilies.length === i);
     createInstancedBatch(geometry, stickMat, subset, `Forest floor • Weathered stick variant ${i + 1}`, true);
-  });
-  forkFamilies.forEach((geometry, i) => {
+  }));
+  await world.loadingJob('Forked ground twigs',()=>forkFamilies.forEach((geometry, i) => {
     const subset = placements.forks.filter((_, j) => j % forkFamilies.length === i);
     createInstancedBatch(geometry, stickMat, subset, `Forest floor • Forked twig variant ${i + 1}`, true);
+  }));
+  await world.loadingJob('Leaves and pine needles',()=>{
+   createInstancedBatch(createLeafClusterGeometry({ seed: 5102 }), leafMat, placements.leafClusters, 'Forest floor • Organic leaf cluster', false);
+   createInstancedBatch(createPineNeedleTuftGeometry({ seed: 8124 }), needleMat, placements.needleTufts, 'Forest floor • Pine needle tuft', false);
   });
-  createInstancedBatch(createLeafClusterGeometry({ seed: 5102 }), leafMat, placements.leafClusters, 'Forest floor • Organic leaf cluster', false);
-  createInstancedBatch(createPineNeedleTuftGeometry({ seed: 8124 }), needleMat, placements.needleTufts, 'Forest floor • Pine needle tuft', false);
-  createInstancedBatch(createBarkFlakeGeometry({ seed: 7129 }), barkFlakeMat, placements.barkFlakes, 'Forest floor • Pine bark scale', true);
-  createInstancedBatch(createPebbleGeometry({ seed: 7123 }), pebbleMat, placements.pebbles, 'Forest floor • Loam pebble', false);
-  createInstancedBatch(createPineConeGeometry({ seed: 8923 }), coneMat, placements.pineCones, 'Forest floor • Scots pine cone', true);
+  await world.loadingJob('Bark, pebbles and pine cones',()=>{
+   createInstancedBatch(createBarkFlakeGeometry({ seed: 7129 }), barkFlakeMat, placements.barkFlakes, 'Forest floor • Pine bark scale', true);
+   createInstancedBatch(createPebbleGeometry({ seed: 7123 }), pebbleMat, placements.pebbles, 'Forest floor • Loam pebble', false);
+   createInstancedBatch(createPineConeGeometry({ seed: 8923 }), coneMat, placements.pineCones, 'Forest floor • Scots pine cone', true);
+  });
 
   world.clutterCounts = {
     groundRocks: placements.groundRocks.length,

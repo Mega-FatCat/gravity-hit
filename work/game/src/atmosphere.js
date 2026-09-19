@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {getProfile} from './quality-profiles.js';
 
 // ATM-01 is deliberately a small, bounded participating-medium pass.  The
 // scene already has the two expensive inputs we need: an opaque depth target
@@ -9,8 +10,8 @@ const V=(x=0,y=0,z=0)=>new T.Vector3(x,y,z);
 const WHITE_PIXEL=new Uint8Array([255,255,255,255]);
 
 export const ATMOSPHERE_QUALITY=Object.freeze({
- low:{scale:0,samples:0},
- medium:{scale:1/3,samples:40},
+ low:{scale:.18,samples:12},
+ medium:{scale:.28,samples:32},
  high:{scale:.5,samples:64},
 });
 const QUALITY=ATMOSPHERE_QUALITY;
@@ -331,11 +332,13 @@ export class Atmosphere {
  setEnabled(value){this.enabled=value!==false;return this.enabled;}
 
  setQuality(value){
-  const q=QUALITY[value]??QUALITY.medium;
-  this.quality=QUALITY[value]?value:'medium';
-  this.sampleCount=q.samples;
-  this.effectResolution.scale=q.scale;
-  if(!q.samples){this.effectResolution.width=0;this.effectResolution.height=0;}
+  const profile=getProfile(value);
+  this.quality=profile===getProfile('low')?'low':profile===getProfile('high')?'high':'medium';
+  this.sampleCount=profile.atmosphereEnabled?profile.atmosphereSamples:0;
+  this.effectResolution.scale=profile.atmosphereEnabled?profile.atmosphereScale:0;
+  this.pollenEnabled=profile.pollenEnabled;
+  if(this.pollen)this.pollen.visible=this.pollenEnabled;
+  if(!this.sampleCount){this.effectResolution.width=0;this.effectResolution.height=0;}
   const material=this._volumeMesh.material;
   material.fragmentShader=volumeFragment(Math.max(1,this.sampleCount));
   material.needsUpdate=true;
@@ -450,7 +453,7 @@ void main(){
 }
 `,transparent:true,depthWrite:false,depthTest:true,toneMapped:false,
   });
-  const points=new T.Points(geometry,material);points.name='Individual forest dust';points.frustumCulled=false;
+  const points=new T.Points(geometry,material);points.name='Individual forest dust';points.frustumCulled=false;points.visible=this.pollenEnabled!==false;
   points.userData.originalPollenCount=originalCount;points.userData.supplementaryPollenCount=SUPPLEMENTARY_POLLEN_COUNT;
   this.world.scene.add(points);this.pollen=points;this._pollenData=geometry.attributes.position.array;
   return points;
@@ -458,7 +461,7 @@ void main(){
 
  update(dt,settings={}){
   this._pollenTime+=Math.max(0,dt);
-  if(this.pollen){
+  if(this.pollen?.visible){
    const p=this._pollenData,wind=Number(settings.wind??this.world.wind??.5),time=this._pollenTime;
    for(let i=0;i<p.length;i+=3){
     const index=i/3,phase=(Math.sin(index*7.123+1.7)*.5+.5)*Math.PI*2;
@@ -537,7 +540,11 @@ void main(){
   renderer.getViewport(this._viewport);renderer.getScissor(this._scissor);renderer.getClearColor(this._clearColor);
   try{
    renderer.info.autoReset=false;renderer.setScissorTest(false);renderer.setClearColor(0,0);renderer.autoClear=true;renderer.xr.enabled=false;
-   renderer.setRenderTarget(this._volumeTarget);renderer.setViewport(0,0,this.effectResolution.width,this.effectResolution.height);renderer.clear();
+   // setRenderTarget already installs the target's full physical viewport.
+   // Calling setViewport with its physical dimensions applies renderer DPR a
+   // second time. On sub-native presets that only painted (renderScale)^2 of
+   // the atmosphere texture, exposing a large bright rectangular boundary.
+   renderer.setRenderTarget(this._volumeTarget);renderer.clear();
    renderer.render(this._volumeScene,this._volumeCamera);
    this._lastPrepared=true;
   }finally{
