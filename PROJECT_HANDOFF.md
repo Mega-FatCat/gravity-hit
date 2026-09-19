@@ -30,6 +30,16 @@ When resolving conflicting information, always follow this strict priority order
 
 ---
 
+## Boot preset changes during loading — 2026-09-19
+
+- **[USER VERIFIED CURRENT] Reported defect:** changing the boot preset from Low to High during loading could leave the forest loaded with Low assets.
+- **[AUTOMATED VERIFIED] Cause:** preset-specific texture and HDR requests begin during `World.loadAssets()`. Changing `World.setQuality()` afterward adjusts the renderer but does not replace requests already in progress. The boot selector also called `save()` while its state variables had not yet been initialized because `main.js` was suspended at `await world.ready`.
+- **[CURRENT BUILD NEEDS MANUAL CHECK] Fix:** boot selection keeps the current load's asset tier fixed, saves the newest choice, and restarts loading when that choice needs a different tier. Rapid changes are combined; the ready button is enabled only when the completed forest matches the latest selection. The save state is initialized before loading starts. Post-load changes continue through the existing quality transition.
+- **[AUTOMATED VERIFIED] Gates:** 121/121 unit tests and Vite production build pass. `node scripts/verify-boot-quality.mjs` exercised Low → Medium → High during loading in Edge and confirmed the completed High profile, 2K texture tier, HDR setting, selected value, and enabled ready button without page errors. No performance numbers were taken for this correctness fix.
+- **[CURRENT BUILD NEEDS MANUAL CHECK] Next priority:** verify the deployed browser build manually by switching Low → High during loading and entering the forest.
+
+---
+
 ## Browser item label and held-object alignment after resize during loading — 2026-09-19
 
 - **[USER VERIFIED CURRENT] Reported defect:** the online build sometimes showed item labels away from the visible props, and picked-up items could appear off-center. The supplied screenshot is the authoritative player-visible evidence of the defect; yesterday's acceptable session does not establish today's behavior.

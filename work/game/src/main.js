@@ -89,13 +89,28 @@ $('scene').addEventListener('webglcontextlost',e=>{e.preventDefault();$('app').i
 const qualitySelect=$('boot-quality-select'),qualityNote=$('boot-quality-note');
 const detectedQuality=world.qualityDecision.automatic.quality;
 const detectedLabel=detectedQuality[0].toUpperCase()+detectedQuality.slice(1);
+let savePending=null,saveWork=null;
+function save(){
+ savePending={settings:{...settings}};
+ if(!saveWork)saveWork=(async()=>{
+  while(savePending){const data=savePending;savePending=null;
+   try{if(window.desktop)await window.desktop.save(data);else localStorage.setItem('znicz-settings',JSON.stringify(data));}
+   catch(e){console.warn('Settings save failed',e);}
+  }
+ })().finally(()=>{saveWork=null;});
+ return saveWork;
+}
+const loadedQuality=world.quality;
+const selectedQuality=()=>settings.quality==='auto'?detectedQuality:settings.quality;
+let worldReady=false,bootReady=false,bootReloadTimer=null,bootReloadPending=false;
 qualitySelect.innerHTML=`<option value="auto">Automatic (${detectedLabel})</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>`;
 if(!['low','medium','high'].includes(settings.quality))settings.quality='auto';
 qualitySelect.value=settings.quality;
 
 const updateBootQuality=()=>{
  const isAuto=settings.quality==='auto';
- const activeLabel=world.profile.label;
+ const active=selectedQuality();
+ const activeLabel=active[0].toUpperCase()+active.slice(1);
  if($('boot-quality-select'))$('boot-quality-select').value=settings.quality;
  if(isAuto){
   qualityNote.textContent=`Automatic · Recommended ${detectedLabel}`;
@@ -110,21 +125,49 @@ updateBootQuality();
 qualitySelect.onchange=()=>{
  const mode=qualitySelect.value;
  settings.quality=mode;
- world.setQuality(mode);
+ if(bootReady){changeQuality(mode);return;}
+ clearTimeout(bootReloadTimer);
+ if(selectedQuality()===loadedQuality){
+  // Only renderer settings may change in place. Asset tiers are fixed at load start.
+  world.setQuality(mode);
+  if(worldReady)finishBoot();
+ }else{
+  $('load-detail').textContent=`Switching to ${selectedQuality()} graphics…`;
+  bootReloadTimer=setTimeout(reloadBootQuality,300);
+ }
  updateBootQuality();
  save();
 };
 
+async function reloadBootQuality(){
+ if(bootReloadPending||selectedQuality()===loadedQuality)return;
+ bootReloadPending=true;
+ clearTimeout(bootReloadTimer);
+ await save();
+ if(selectedQuality()===loadedQuality){bootReloadPending=false;if(worldReady)finishBoot();return;}
+ try{sessionStorage.setItem(QUALITY_TRANSITION_KEY,JSON.stringify({reason:'quality',createdAt:Date.now(),mode:settings.quality}));}catch{}
+ location.reload();
+}
+
 world.start();
 await world.ready;
 world.syncViewport();
-loadingAudit.done=true;loadingAudit.readyMs=Math.round(performance.now()-loadingAudit.startedAt);
-loadingProgress.complete('renderer','Graphics ready');loadingProgress.complete('terrain','Terrain ready');loadingProgress.complete('assets','Preset assets loaded');loadingProgress.complete('scene','Forest prepared');loadingProgress.complete('props','Objects ready');loadingProgress.complete('shaders','Ready');
-try{
- const budSprite=renderBudSpriteDataUrl(world.renderer);
- if($('nug'))$('nug').style.backgroundImage=`url("${budSprite}")`;
-}catch(e){console.warn('Bud sprite render',e);}
-$('begin').disabled=false;$('begin').textContent=saved||qualityTransition?'Return to the clearing →':'Enter the clearing →';$('loading').classList.add('complete');$('boot-quality').classList.add('complete');$('load-title').textContent='The forest is ready.';updateBootQuality();
+worldReady=true;
+if(selectedQuality()===loadedQuality)finishBoot();else reloadBootQuality();
+
+function finishBoot(){
+ if(bootReady||selectedQuality()!==loadedQuality)return;
+ clearTimeout(bootReloadTimer);
+ bootReady=true;
+ world.setQuality(settings.quality);
+ loadingAudit.done=true;loadingAudit.readyMs=Math.round(performance.now()-loadingAudit.startedAt);
+ loadingProgress.complete('renderer','Graphics ready');loadingProgress.complete('terrain','Terrain ready');loadingProgress.complete('assets','Preset assets loaded');loadingProgress.complete('scene','Forest prepared');loadingProgress.complete('props','Objects ready');loadingProgress.complete('shaders','Ready');
+ try{
+  const budSprite=renderBudSpriteDataUrl(world.renderer);
+  if($('nug'))$('nug').style.backgroundImage=`url("${budSprite}")`;
+ }catch(e){console.warn('Bud sprite render',e);}
+ $('begin').disabled=false;$('begin').textContent=saved||qualityTransition?'Return to the clearing →':'Enter the clearing →';$('loading').classList.add('complete');$('boot-quality').classList.add('complete');$('load-title').textContent='The forest is ready.';updateBootQuality();
+}
 
 function begin(){started=true;$('welcome').classList.add('hidden');$('loading-art').classList.add('hidden');$('hud').classList.remove('hidden');sound.start();}
 $('begin').onclick=begin;
@@ -267,18 +310,6 @@ let photoToken=0;
 async function enterPhoto(){if(photo||photoLoading)return;const token=++photoToken;photoLoading=true;clearInput();$('hud').classList.add('hidden');$('photo-label').classList.remove('hidden');$('photo-label').textContent='Path tracing · preparing light paths… · Esc to return';try{await world.enablePathTracing();if(token!==photoToken){world.disablePathTracing();return;}photo=true;}catch(e){sim.say(`Photo mode could not start: ${e.message}`);world.disablePathTracing();$('hud').classList.remove('hidden');$('photo-label').classList.add('hidden');console.error(e);}finally{photoLoading=false;}}
 function leavePhoto(){photoToken++;photo=false;photoLoading=false;world.disablePathTracing();$('photo-label').classList.add('hidden');$('hud').classList.toggle('hidden',!started||uiHidden);}
 $('photo-label').onclick=leavePhoto;
-let savePending=null,saveWork=null;
-function save(){
- savePending={settings:{...settings}};
- if(!saveWork)saveWork=(async()=>{
-  while(savePending){const data=savePending;savePending=null;
-   try{if(window.desktop)await window.desktop.save(data);else localStorage.setItem('znicz-settings',JSON.stringify(data));}
-   catch(e){console.warn('Settings save failed',e);}
-  }
- })().finally(()=>{saveWork=null;});
- return saveWork;
-}
-
 window.addEventListener('beforeunload',()=>{try{localStorage.setItem('znicz-settings',JSON.stringify({settings:{...settings}}));}catch{}});
 let last=null,uiTime=0,frameTimes=[],lastPhase=sim.phase,coughPlayed=false;
 function frame(now){requestAnimationFrame(frame);const elapsed=last===null?0:Math.max(0,(now-last)/1000);last=now;const dt=Math.min(.05,elapsed);if(elapsed>0)frameTimes.push(elapsed*1000);if(frameTimes.length>300)frameTimes.shift();
