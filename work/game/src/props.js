@@ -1,6 +1,7 @@
 import * as T from 'three';
 import {normalizeLatheNormals,specularAntialiasing} from './edge-quality.js';
 import {createBagFilmMaterial} from './weed-bag.js';
+import {createBudGeometry} from './bud.js';
 
 // ============================================================================
 // HERO-PROP RUNTIME SOURCE-OF-TRUTH (GH-43 ARCHITECTURAL AUDIT)
@@ -254,44 +255,23 @@ function rebuildPipe(world){
   if(pipeResidueOrig)pipe.add(residue);
   world.pipeResidue=residue;
 
-  if(world.heroModels?.packedCharge){
-   const pc=world.heroModels.packedCharge.getObjectByName('PackedCharge');
-   if(pc){
-    if(pc.isMesh){
-     world.bowlBud.geometry.dispose();
-     world.bowlBud.geometry=pc.geometry.clone();
-     world.bowlBud.material=world.budMat;
-     if(pc.morphTargetDictionary){
-      world.bowlBud.morphTargetDictionary={...pc.morphTargetDictionary};
-      world.bowlBud.morphTargetInfluences=pc.morphTargetInfluences?[...pc.morphTargetInfluences]:[0,0];
-     }
-    }else{
-     world.bowlBud.geometry.dispose();
-     world.bowlBud.geometry=new T.BufferGeometry();
-     while(world.bowlBud.children.length)world.bowlBud.remove(world.bowlBud.children[0]);
-     const pcClone=pc.clone();
-     pcClone.traverse(child=>{
-      if(child.isMesh){
-       child.material=world.budMat;
-       child.castShadow=true;
-       child.receiveShadow=true;
-      }
-     });
-     world.bowlBud.add(pcClone);
-     world.heroProps.packedCharge=pcClone;
-    }
-    world.bowlBud.scale.set(1.0,1.0,1.0);
-   }
-  }
+  world.bowlBud.geometry.dispose();
+  world.bowlBud.geometry=createBudGeometry({seed:101,scale:0.92,calyxCount:46,leafCount:16,pistilCount:24});
+  world.bowlBud.material=world.budMat;
+  world.bowlBud.renderOrder=3;
+  world.bowlBud.morphTargetDictionary={Spent:0};
+  world.bowlBud.morphTargetInfluences=[0];
+  while(world.bowlBud.children.length)world.bowlBud.remove(world.bowlBud.children[0]);
+  world.bowlBud.scale.set(1.0,1.0,1.0);
 
   const scale=80.0/96.5;
   world.hotTip.geometry.dispose();
   world.hotTip.geometry=lathe([[.00315,-.004],[.00355,-.004],[.00355,.003],[.00315,.003]],48);
   world.hotTip.position.set(0,-0.049*scale+0.005+0.016,0);
   world.hotTip.userData.pickable=false;
-  world.bowlBud.position.set(0,0.040*scale+0.016,0);
+  world.bowlBud.position.set(0,0.051,0);
   world.bowlBud.userData.pickable=false;
-  world.emberLight.position.set(0,0.042*scale+0.016,0);
+  world.emberLight.position.set(0,0.053,0);
 
   mark(world,pipe,'pipe');
   world.heroProps.pipe=world.pipeGlass;
@@ -335,8 +315,8 @@ function rebuildPipe(world){
   const residue=add(pipe,'Inner amber residue',lathe(residueProfile,64),residueMaterial);residue.position.y+=0.016;residue.renderOrder=4;residue.userData.pickable=false;
   world.pipeResidue=residue;
   world.hotTip.geometry.dispose();world.hotTip.geometry=lathe([[.00315,-.004],[.00355,-.004],[.00355,.003],[.00315,.003]],48);world.hotTip.position.set(0,-.044+0.016,0);world.hotTip.userData.pickable=false;
-  world.bowlBud.position.set(0,.040+0.016,0);world.bowlBud.scale.set(1.0,1.0,1.0);world.bowlBud.userData.pickable=false;
-  world.emberLight.position.set(0,.042+0.016,0);
+  world.bowlBud.position.set(0,0.051,0);world.bowlBud.scale.set(1.0,1.0,1.0);world.bowlBud.userData.pickable=false;
+  world.emberLight.position.set(0,0.053,0);
   mark(world,pipe,'pipe');
   world.heroProps.pipe=world.pipeGlass;
  }
@@ -1123,8 +1103,8 @@ export function upgradeHeroProps(world){
  const scale = world.heroModels?.pipe ? (80.0 / 96.5) : 1.0;
  world.heroAnchors={
   pipeTip:V(0,-.049*scale+0.016,0),
-  bowl:V(0,.045*scale+0.016,0),
-  budSeat:V(0,.040*scale+0.016,0),
+  bowl:V(0,0.051,0),
+  budSeat:V(0,0.051,0),
   bottleMouth:V(0,.226,0),
   outlet:V(.0326,.032,0),
   nozzle:world.nozzle?world.nozzle.clone():V(0,0,0)
@@ -1180,6 +1160,10 @@ export function upgradeHeroProps(world){
    if('Spent' in d){
     world.bowlBud.morphTargetInfluences[d['Spent']]=Math.max(0,1.0-sim.bud);
    }
+  }
+  if(world.budMat){
+   const ashDarken=0.35+0.65*sim.bud;
+   world.budMat.color.setRGB(ashDarken,ashDarken,ashDarken);
   }
  };
 }

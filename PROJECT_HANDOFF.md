@@ -30,6 +30,23 @@ When resolving conflicting information, always follow this strict priority order
 
 ---
 
+## Loaded Pipe Herb Visuals & Weed Bag Bud Spawning Fix — 2026-09-19
+
+- **[USER VERIFIED CURRENT] Reported defect:** When the pipe (lufka) was loaded (`sim.bud > 0`), it remained graphically empty. Additionally, selecting the weed bag failed to spawn the draggable bud nugget that can be moved into the pipe.
+- **[AUTOMATED VERIFIED] Cause:**
+  1. `props.js:rebuildPipe()` replaced `world.bowlBud` with an uncolored clone from `packed_charge.glb` and positioned it at `y = 0.040*scale+0.016`, leaving the optical bowl cavity empty and devoid of herbal detail.
+  2. In `main.js:drawUI()`, a previous commit added `packReady = sim.mode === 'pack' && bagPose?.key === 'held' && bagPose.elapsed >= .28` to gate `#packing`. Clicking the weed bag delayed spawning by 280–440ms; impatient clicks called `toggleAct('bag')` which stowed the bag immediately, preventing the draggable nug from ever spawning. Furthermore, when the pipe was loaded, attempting to pack blocked the player with "The pipe is already loaded", but because the pipe appeared visually empty, it looked as if bud spawning was completely broken.
+- **[CURRENT BUILD NEEDS MANUAL CHECK] Fix:**
+  1. **Authentic Botanical Herb in Pipe Bowl:** `bud.js:createBudGeometry()` now includes a `'Spent'` morph target (shrinks vertices radially by 48% and sinks them downward as herb burns into ash). In `props.js:rebuildPipe()`, `world.bowlBud` is populated with `createBudGeometry({seed: 101, scale: 0.92, calyxCount: 46, leafCount: 16, pistilCount: 24})` positioned at `(0, 0.051, 0)` with `renderOrder: 3`. In `heroProps.update(sim)`, `world.budMat.color` darkens progressively to ash (`0.35 + 0.65 * sim.bud`) and the `'Spent'` morph target tracks `Math.max(0, 1.0 - sim.bud)`.
+  2. **Immediate Weed Bag Nugget Spawning:** In `main.js:drawUI()`, removed the `elapsed >= .28` condition, restoring `$('packing').classList.toggle('hidden', sim.mode !== 'pack')`. The draggable bud nugget spawns immediately when weed bag packing mode is active.
+- **[AUTOMATED VERIFIED] Gates:**
+  1. `npm.cmd test`: 121/121 unit tests pass.
+  2. `npm.cmd run build`: Vite build passes cleanly (179 modules transformed).
+  3. Real runtime before/after captures: pre-change captures preserved in `work/game/qa/bud-diagnostic/before/`; post-change captures recorded in `work/game/qa/bud-diagnostic/after/`, including macro close-ups (`08-macro-loaded-bowl.png`, `09-macro-empty-bowl.png`, `10-macro-burning-ash.png`) confirming full loaded herb, empty bowl, and glowing embers/ash shrinkage.
+- **[CURRENT BUILD NEEDS MANUAL CHECK] Next priority:** Manual interactive playtest of the ritual loop: select weed bag -> drag bud nugget to pipe opening -> observe full bowl -> attach cap/pipe to bottle -> heat with lighter and draw waterfall hit.
+
+---
+
 ## Boot preset changes during loading — 2026-09-19
 
 - **[USER VERIFIED CURRENT] Reported defect:** changing the boot preset from Low to High during loading could leave the forest loaded with Low assets.

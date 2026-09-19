@@ -556,7 +556,7 @@ export class World {
    this.pipeGlass=mesh(lathe(pipeProfile,48),this.pipeMat,cap,V(0,0.016,0));this.pipeGlass.castShadow=false;
    mesh(new T.CylinderGeometry(.0074,.0074,.006,24),mat('#1a1d1e',.65),cap,V(0,.023,0));
    this.hotTip=mesh(new T.CylinderGeometry(.0055,.0055,.012,24),new T.MeshBasicMaterial({color:'#f24f20',transparent:true,opacity:0,depthWrite:false}),cap,V(0,-.015+0.016,0));this.hotTip.castShadow=false;
-   this.budMat=createBudMaterial();this.bowlBud=mesh(createBudGeometry({seed:101,scale:0.68}),this.budMat,cap,V(0,.040+0.016,0));this.bagBudMat=createBudMaterial();
+   this.budMat=createBudMaterial();this.bowlBud=mesh(createBudGeometry({seed:101,scale:0.92,calyxCount:46,leafCount:16,pistilCount:24}),this.budMat,cap,V(0,0.051,0));this.bowlBud.renderOrder=3;this.bowlBud.morphTargetDictionary={Spent:0};this.bowlBud.morphTargetInfluences=[0];this.bagBudMat=createBudMaterial();
    this.emberLight=new T.PointLight('#ff752e',0,.25,2);cap.add(this.emberLight);this.emberLight.position.set(0,.074+0.016,0);
    const lighter=new T.Group();this.scene.add(lighter);this.items.lighter=lighter;const lighterBody=mat('#111413',.31);
    mesh(new T.CylinderGeometry(.015,.015,.073,40),lighterBody,lighter,V(0,.038,0));

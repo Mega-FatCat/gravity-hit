@@ -210,9 +210,7 @@ function drawUI(){
  $('toast').classList.toggle('hidden',sim.noticeTimer<=0);$('toast').textContent=sim.notice;
  const mini=['heat','press','unscrew','hole','screw','uncap','ignite','fill'].includes(sim.mode);$('mini').classList.toggle('hidden',!mini);$('mini-label').textContent={heat:'WARMING THE GLASS',press:'FITTING THE PIPE',unscrew:'UNSCREWING',hole:'OPENING THE OUTLET',screw:'ATTACHING THE CAP',uncap:'OPENING THE CAP',ignite:'FLAME CONTACT',fill:'FILLING'}[sim.mode]||'';
  const progress=sim.phase==='heat'?sim.heat:sim.mode==='ignite'?sim.embers:sim.mode==='fill'?sim.water:sim.progress;$('mini-bar').style.width=`${progress*100}%`;$('angle').textContent=['heat','hole','ignite'].includes(sim.mode)?'LMB flame  ·  Aim with mouse':['screw','uncap','unscrew'].includes(sim.mode)?'A unscrew  ·  D screw':sim.mode==='fill'?'LMB collect  ·  SPACE seal the outlet':'Hold LMB to press';
- const bagPose=world.poses?.bag;
- const packReady=sim.mode==='pack'&&bagPose?.key==='held'&&bagPose.elapsed>=.28;
- $('packing').classList.toggle('hidden',!packReady);
+ $('packing').classList.toggle('hidden',sim.mode!=='pack');
  const selected=[sim.held,sim.supporting];for(const id of Object.keys(labels))$(`slot-${id}`).classList.toggle('selected',selected.includes(id));
  $('right-panel').classList.toggle('hidden',sim.prep<2);$('fps').classList.toggle('hidden',!settings.showFps);$('weather-tag').textContent=`PINE HOLLOW · ${settings.weather==='rain'?'PASSING RAIN':settings.weather==='mist'?'LOW MIST':'LATE AFTERNOON'}`;
  let fade=0;if(sim.phase==='inhale'&&settings.motion)fade=sim.cough*.44*Math.sin(clamp(sim.transition/4)*Math.PI);$('fade').style.opacity=fade;

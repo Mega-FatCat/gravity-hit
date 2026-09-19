@@ -267,6 +267,22 @@ export function createBudGeometry(options = {}) {
   // Center vertically at middle of mass
   merged.translate(0, -0.0035 * overallScale, 0);
 
+  // 'Spent' morph target for combustion: as herb burns down to ash,
+  // the cluster contracts inward and sinks down into the base of the pipe bowl.
+  const finalPos = merged.attributes.position;
+  const spentPositions = new Float32Array(finalPos.count * 3);
+  for (let i = 0; i < finalPos.count; i++) {
+    const px = finalPos.getX(i);
+    const py = finalPos.getY(i);
+    const pz = finalPos.getZ(i);
+    spentPositions[i * 3] = px * 0.52;
+    spentPositions[i * 3 + 1] = py * 0.45 - 0.0018 * overallScale;
+    spentPositions[i * 3 + 2] = pz * 0.52;
+  }
+  merged.morphAttributes.position = [
+    new T.BufferAttribute(spentPositions, 3)
+  ];
+
   return merged;
 }
 
