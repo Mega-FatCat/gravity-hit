@@ -86,26 +86,34 @@ let world;
 try{world=new World($('scene'),event=>{if(typeof event==='number')loadingProgress.update('assets',event);else loadingProgress.update(event.task,event.progress,event);},settings.quality,{deferInitialize:true,downloadProgress});}catch(e){$('app').innerHTML+=`<div class="error">The graphics renderer could not start.<br>${String(e.message)}<br>Please try restarting the game.</div>`;throw e;}
 $('scene').addEventListener('webglcontextlost',e=>{e.preventDefault();$('app').insertAdjacentHTML('beforeend','<div class="error" id="ctx-lost">Graphics context lost. The page may need to be reloaded.</div>');});$('scene').addEventListener('webglcontextrestored',()=>{const el=$('ctx-lost');if(el)el.remove();world.renderer.shadowMap.needsUpdate=true;});
 const qualitySelect=$('boot-quality-select'),qualityNote=$('boot-quality-note');
-const updateBootQuality=()=>{const detected=world.qualityDecision.automatic.quality,label=detected[0].toUpperCase()+detected.slice(1),active=world.profile.label;qualityNote.textContent=settings.quality==='auto'?`Recommended ${label} · loading ${active}`:`Selected ${active} · automatic recommends ${label}`;};
-qualitySelect.value=settings.quality;updateBootQuality();
-let worldStarted=false;
-qualitySelect.onchange=async()=>{
+const detectedQuality=world.qualityDecision.automatic.quality;
+const detectedLabel=detectedQuality[0].toUpperCase()+detectedQuality.slice(1);
+qualitySelect.innerHTML=`<option value="auto">Automatic (${detectedLabel})</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>`;
+if(!['low','medium','high'].includes(settings.quality))settings.quality='auto';
+qualitySelect.value=settings.quality;
+
+const updateBootQuality=()=>{
+ const isAuto=settings.quality==='auto';
+ const activeLabel=world.profile.label;
+ if($('boot-quality-select'))$('boot-quality-select').value=settings.quality;
+ if(isAuto){
+  qualityNote.textContent=`Automatic · Recommended ${detectedLabel}`;
+  $('load-eyebrow').textContent=`AUTOMATIC GRAPHICS (${detectedLabel.toUpperCase()})`;
+ }else{
+  qualityNote.textContent=`Manual preset: ${activeLabel} · Automatic recommends ${detectedLabel}`;
+  $('load-eyebrow').textContent=`${activeLabel.toUpperCase()} GRAPHICS`;
+ }
+};
+updateBootQuality();
+
+qualitySelect.onchange=()=>{
  const mode=qualitySelect.value;
  settings.quality=mode;
+ world.setQuality(mode);
+ updateBootQuality();
  save();
- if(!worldStarted){
-  world.setQuality(mode);
-  updateBootQuality();
-  return;
- }
- await changeQuality(mode);
 };
-await new Promise(resolve=>{
- let resolved=false;
- const beginLoad=()=>{if(resolved)return;resolved=true;worldStarted=true;resolve();};
- const timer=setTimeout(beginLoad,(isQa||qualityTransition)?0:3000);
- qualitySelect.addEventListener('change',()=>{clearTimeout(timer);beginLoad();},{once:true});
-});
+
 world.start();
 await world.ready;
 loadingAudit.done=true;loadingAudit.readyMs=Math.round(performance.now()-loadingAudit.startedAt);
@@ -114,7 +122,7 @@ try{
  const budSprite=renderBudSpriteDataUrl(world.renderer);
  if($('nug'))$('nug').style.backgroundImage=`url("${budSprite}")`;
 }catch(e){console.warn('Bud sprite render',e);}
-$('begin').disabled=false;$('begin').textContent=saved||qualityTransition?'Return to the clearing →':'Enter the clearing →';$('loading').classList.add('complete');$('boot-quality').classList.add('complete');$('load-title').textContent='The forest is ready.';$('load-eyebrow').textContent=`${world.profile.label.toUpperCase()} GRAPHICS`;
+$('begin').disabled=false;$('begin').textContent=saved||qualityTransition?'Return to the clearing →':'Enter the clearing →';$('loading').classList.add('complete');$('boot-quality').classList.add('complete');$('load-title').textContent='The forest is ready.';updateBootQuality();
 
 function begin(){started=true;$('welcome').classList.add('hidden');$('loading-art').classList.add('hidden');$('hud').classList.remove('hidden');sound.start();}
 $('begin').onclick=begin;
@@ -233,7 +241,7 @@ async function changeQuality(mode){
  if(qualityChangePending)return;
  const target=mode==='auto'?(world.qualityDecision?.automatic?.quality??'medium'):mode;
  settings.quality=mode;
- if(target===world.quality){world.setQuality(mode);await save();renderMenu();return;}
+ if(target===world.quality){world.setQuality(mode);updateBootQuality();await save();renderMenu();return;}
  qualityChangePending=true;
  paused=true;clearInput();
  const targetLabel=target[0].toUpperCase()+target.slice(1);
