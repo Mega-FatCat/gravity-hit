@@ -2,6 +2,7 @@
 node_modules/
 npm-cache/
 .npm/
+.vite/
 
 # Build & packaging outputs (GitHub Actions builds web release; portable exe is generated locally)
 work/game/dist/

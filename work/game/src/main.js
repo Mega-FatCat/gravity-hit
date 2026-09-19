@@ -173,7 +173,14 @@ function begin(){started=true;$('welcome').classList.add('hidden');$('loading-ar
 $('begin').onclick=begin;
 if(qualityTransition){world.yaw=Number(qualityTransition.yaw)||0;world.pitch=Number.isFinite(qualityTransition.pitch)?qualityTransition.pitch:-.265;uiHidden=!!qualityTransition.uiHidden;if(qualityTransition.started){begin();$('hud').classList.toggle('hidden',uiHidden);sim.say(`${world.profile.label} graphics loaded.`);}}
 function act(id){if(!started||paused||photo)return;sound.effect(id==='stream'?'water':id==='bottle'?'screw':'glass');input.fire=false;sim.action(id);save();}
-function toggleAct(id){if(!started||paused||photo)return;if(sim.isHeld(id)||(id==='stream'&&sim.mode==='fill')){sound.effect('click');sim.toggle(id);save();return;}act(id);}
+function toggleAct(id){
+ if(!started||paused||photo)return;
+ if(id==='bag'&&sim.phase==='free'&&!sim.cap&&sim.bud===0&&sim.stock>0&&sim.mode!=='pack'){
+  sound.effect('click');act('bag');return;
+ }
+ if(sim.isHeld(id)||(id==='stream'&&sim.mode==='fill')){sound.effect('click');sim.toggle(id);save();return;}
+ act(id);
+}
 document.querySelectorAll('[data-item]').forEach(e=>e.onclick=event=>{event.stopPropagation();toggleAct(e.dataset.item);});
 function guideToggle(){sim.tutorial=!sim.tutorial;settings.guide=sim.tutorial;save();}
 $('guide-toggle').onclick=guideToggle;$('settings-open').onclick=()=>openMenu();$('leave-mode').onclick=()=>sim.cancel();$('take-hit').onclick=()=>act('hit');
@@ -235,7 +242,7 @@ $('scene').addEventListener('pointerdown',e=>{
  }
 });
 window.addEventListener('pointermove',e=>{input.x=e.clientX;input.y=e.clientY;if(dragLook&&!paused&&!photo)world.look(e.movementX,e.movementY);if(dragNug){$('nug').style.left=`${e.clientX-19}px`;$('nug').style.top=`${e.clientY-19}px`;}});
-window.addEventListener('pointerup',e=>{if(e.button===2){dragLook=false;if($('scene').hasPointerCapture(e.pointerId))$('scene').releasePointerCapture(e.pointerId);}if(e.button===0)input.fire=false;if(dragNug){world.prepareFrame(0,sim,input,settings);const p=world.aimScreen;const success=Math.hypot(e.clientX-p.x,e.clientY-p.y)<27;sim.pack(success);sound.effect(success?'glass':'click');dragNug=false;resetNug();save();}});
+window.addEventListener('pointerup',e=>{if(e.button===2){dragLook=false;if($('scene').hasPointerCapture(e.pointerId))$('scene').releasePointerCapture(e.pointerId);}if(e.button===0)input.fire=false;if(dragNug){world.prepareFrame(0,sim,input,settings);const p=world.aimScreen;const success=Math.hypot(e.clientX-p.x,e.clientY-p.y)<48;sim.pack(success);sound.effect(success?'glass':'click');dragNug=false;resetNug();if(!success&&sim.stock>0&&!sim.cap&&sim.bud===0&&['pipe','bag'].includes(sim.held)){sim.action('pack');}save();}});
 function resetNug(){$('nug').style.left='32%';$('nug').style.top='53%';}
 $('nug').addEventListener('pointerdown',e=>{if(paused)return;e.preventDefault();e.stopPropagation();dragNug=true;$('nug').setPointerCapture(e.pointerId);});
 window.addEventListener('keydown',e=>{

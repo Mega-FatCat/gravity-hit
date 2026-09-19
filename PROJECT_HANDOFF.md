@@ -28,6 +28,26 @@ When resolving conflicting information, always follow this strict priority order
 7. **Prior agent claims and conversational summaries**
 8. **Unverified assumptions**
 
+## Weed Bag Bud Spawning & Pipe Packing Flow Restoration — 2026-09-19
+
+- **[USER VERIFIED CURRENT] Reported defect:** The draggable weed bud nugget ("bud") disappeared when holding the pipe and selecting the weed bag, leaving the player completely unable to pack the glass pipe.
+- **[AUTOMATED VERIFIED] Cause:**
+  1. In `simulation.js`, when a charge drag missed or when items were selected/held, `sim.mode` reverted to `'idle'`, hiding `#packing` while the player was holding both the pipe and weed bag.
+  2. In `main.js:toggleAct('bag')`, clicking the weed bag slot or on-screen label while the bag was already held called `sim.toggle('bag')`, stowing the bag onto the slab instead of re-entering packing mode.
+  3. In `style.css`, `.nug` lacked a CSS background fallback, making it reliant solely on an offscreen WebGL canvas sprite render.
+  4. The drop targeting radius was set to only 27px, causing frequent frustrating misses.
+- **[CURRENT BUILD NEEDS MANUAL CHECK] Fix:**
+  1. **Guaranteed Co-Held Packing Mode:** `simulation.js:step()` guarantees `mode = 'pack'` whenever the bag and pipe are held together in free phase with an empty, uncapped bowl.
+  2. **Non-Stowing Bag Click:** `main.js:toggleAct('bag')` re-enters packing mode (`act('bag')`) rather than stowing when holding bag and pipe with an empty bowl.
+  3. **Miss Auto-Rearm & Wider Drop Radius:** `main.js:pointerup` drop radius increased to 48px, and missed drops automatically re-arm packing mode (`sim.action('pack')`) and reposition the next nug immediately without stranding the user.
+  4. **Botanical Bud CSS Fallback:** `.nug` in `style.css` restored with organic radial gradient (`#b2be72` to `#344320`), `border-radius: 44% 34% 42% 36%`, and inner glow.
+  5. **Anti-Cache Headers:** `index.html` updated with `Cache-Control: no-cache, no-store, must-revalidate` meta tags to prevent CDN/browser cache of old bundles.
+- **[AUTOMATED VERIFIED] Gates:**
+  1. `npm.cmd --prefix work/game test`: 122/122 unit tests pass (including new test `weed bag and pipe co-holding guarantees packing mode in free ritual phase`).
+  2. `npm.cmd --prefix work/game run build`: Vite build passes cleanly (`index-BgymFvDZ.js`).
+  3. Live browser automation (`node work/game/scripts/verify-weed-packing.mjs`) verified: selecting bag with pipe held immediately spawns bud nugget, dragging outside re-arms pack mode with next nugget, dragging into bowl successfully loads pipe with 3D herb, and exits packing mode. Runtime screenshots: `verify-pack-spawned.png` and `verify-bowl-loaded.png`.
+- **[CURRENT BUILD NEEDS MANUAL CHECK] Next priority:** Manual playtest in browser on GitHub Pages to confirm user experience.
+
 ---
 
 ## Loaded Pipe Herb Visuals & Weed Bag Bud Spawning Fix — 2026-09-19

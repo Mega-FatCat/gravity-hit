@@ -244,6 +244,9 @@ export class Simulation {
     this.water=clamp(this.water+(input.fire?dt*.3*aim:0));
     if(this.water>=.995){this.mode='idle';this.say('Full. Hold SPACE to seal the outlet.');}
    }
+   if(this.mode==='idle'&&!this.cap&&this.bud===0&&this.stock>0&&this.isHeld('bag')&&this.isHeld('pipe')){
+    this.mode='pack';
+   }
    if(tilt<0){
     if(this.cap){
      if(this.held!=='bottle'){this.held='bottle';this.supporting=null;}

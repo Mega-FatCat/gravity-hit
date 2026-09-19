@@ -123,3 +123,21 @@ test('state stays bounded through arbitrary physical inputs and invalid time del
   for(const k of ['water','smoke','bud','embers'])assert.ok(s[k]>=0&&s[k]<=1,k);assert.ok(s.smokeDensity>=0&&s.smokeDensity<=1);assert.ok(s.held!==s.supporting||s.held===null);
  }
 });
+test('weed bag and pipe co-holding guarantees packing mode in free ritual phase',()=>{
+ const s=ready({held:'pipe',supporting:null});
+ s.action('bag');
+ assert.equal(s.mode,'pack');
+ assert.equal(s.isHeld('bag'),true);
+ assert.equal(s.isHeld('pipe'),true);
+ s.step(0.02);
+ assert.equal(s.mode,'pack');
+ assert.equal(s.pack(false),true);
+ assert.equal(s.stock,9);
+ s.step(0.02);
+ assert.equal(s.mode,'pack');
+ assert.equal(s.pack(true),true);
+ assert.equal(s.bud,1);
+ assert.equal(s.mode,'idle');
+ s.step(0.02);
+ assert.equal(s.mode,'idle');
+});
