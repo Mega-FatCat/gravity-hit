@@ -84,6 +84,7 @@ const loadingProgress=new LoadingProgress(({progress,percent,stage,detail,comple
 loadingProgress.register('renderer',.02,'Checking graphics hardware').register('terrain',.12,'Shaping the clearing').register('assets',.36,'Loading preset assets').register('scene',.35,'Assembling the forest').register('props',.05,'Finishing ritual objects').register('shaders',.10,'Warming graphics shaders');
 let world;
 try{world=new World($('scene'),event=>{if(typeof event==='number')loadingProgress.update('assets',event);else loadingProgress.update(event.task,event.progress,event);},settings.quality,{deferInitialize:true,downloadProgress});}catch(e){$('app').innerHTML+=`<div class="error">The graphics renderer could not start.<br>${String(e.message)}<br>Please try restarting the game.</div>`;throw e;}
+window.addEventListener('resize',()=>world.resize());
 $('scene').addEventListener('webglcontextlost',e=>{e.preventDefault();$('app').insertAdjacentHTML('beforeend','<div class="error" id="ctx-lost">Graphics context lost. The page may need to be reloaded.</div>');});$('scene').addEventListener('webglcontextrestored',()=>{const el=$('ctx-lost');if(el)el.remove();world.renderer.shadowMap.needsUpdate=true;});
 const qualitySelect=$('boot-quality-select'),qualityNote=$('boot-quality-note');
 const detectedQuality=world.qualityDecision.automatic.quality;
@@ -116,6 +117,7 @@ qualitySelect.onchange=()=>{
 
 world.start();
 await world.ready;
+world.syncViewport();
 loadingAudit.done=true;loadingAudit.readyMs=Math.round(performance.now()-loadingAudit.startedAt);
 loadingProgress.complete('renderer','Graphics ready');loadingProgress.complete('terrain','Terrain ready');loadingProgress.complete('assets','Preset assets loaded');loadingProgress.complete('scene','Forest prepared');loadingProgress.complete('props','Objects ready');loadingProgress.complete('shaders','Ready');
 try{
@@ -221,7 +223,6 @@ window.addEventListener('keydown',e=>{
  const index=['Digit1','Digit2','Digit3','Digit4','Digit5'].indexOf(e.code);if(index>=0&&!e.repeat)toggleAct(['pipe','lighter','bottle','bag','stream'][index]);
 });
 window.addEventListener('keyup',e=>{if(e.code==='KeyA')input.left=false;if(e.code==='KeyD')input.right=false;if(e.code==='Space')input.seal=false;});
-window.addEventListener('resize',()=>world.resize());
 
 const range=(key,name,sub='')=>`<div class="setting"><label for="set-${key}">${name}<span>${sub}</span></label><input id="set-${key}" data-setting="${key}" type="range" min="0" max="1" step=".01" value="${settings[key]}"></div>`;
 const toggle=(key,name,sub='')=>`<div class="setting"><label for="set-${key}">${name}<span>${sub}</span></label><input id="set-${key}" data-setting="${key}" type="checkbox" ${settings[key]?'checked':''}></div>`;
@@ -281,6 +282,7 @@ function save(){
 window.addEventListener('beforeunload',()=>{try{localStorage.setItem('znicz-settings',JSON.stringify({settings:{...settings}}));}catch{}});
 let last=null,uiTime=0,frameTimes=[],lastPhase=sim.phase,coughPlayed=false;
 function frame(now){requestAnimationFrame(frame);const elapsed=last===null?0:Math.max(0,(now-last)/1000);last=now;const dt=Math.min(.05,elapsed);if(elapsed>0)frameTimes.push(elapsed*1000);if(frameTimes.length>300)frameTimes.shift();
+ world.syncViewport();
  if(photo){world.pathTracer?.renderSample();$('photo-label').textContent=`Ray-traced photograph · ${Math.floor(world.pathTracer?.samples||0)} samples · Esc to return`;return;}
  if(photoLoading)return;
  world.prepareFrame(paused?0:dt,sim,input,settings);

@@ -629,6 +629,7 @@ export class World {
    this.qualityDecision=decision;this.qualityMode=decision.mode;this.quality=decision.quality;this.profile=profile;
    const dpr=Math.min(window.devicePixelRatio||1,profile.maxPixelRatio);
    this.renderer.setPixelRatio(dpr*profile.renderScale);
+   this.viewportDpr=window.devicePixelRatio||1;
    this.renderer.shadowMap.enabled=profile.shadowsEnabled;
    this.renderer.shadowMap.autoUpdate=profile.shadowAutoUpdate;
    if(profile.shadowsEnabled&&profile.shadowMapSize!==this.sun.shadow.mapSize.x){this.sun.shadow.mapSize.set(profile.shadowMapSize,profile.shadowMapSize);this.sun.shadow.map?.dispose();this.sun.shadow.map=null;}
@@ -638,11 +639,20 @@ export class World {
    this.renderer.shadowMap.needsUpdate=true;
    this._shadowState=null;
    this.renderer.setSize(innerWidth,innerHeight);
+   this.viewportWidth=innerWidth;this.viewportHeight=innerHeight;
    this.atmosphere?.setQuality(decision.quality);
    if(this.pollen)this.pollen.visible=profile.pollenEnabled;
    if(this.finalEdges)this.finalEdges.mode=profile.edgePass;
   }
-  resize(){this.camera.aspect=innerWidth/innerHeight;this.camera.updateProjectionMatrix();this.renderer.setSize(innerWidth,innerHeight);this.atmosphere?.resize();}
+  resize(){
+   const dpr=window.devicePixelRatio||1;
+   this.camera.aspect=innerWidth/innerHeight;this.camera.updateProjectionMatrix();
+   if(dpr!==this.viewportDpr){this.renderer.setPixelRatio(Math.min(dpr,this.profile.maxPixelRatio)*this.profile.renderScale);this.viewportDpr=dpr;}
+   this.renderer.setSize(innerWidth,innerHeight);
+   this.viewportWidth=innerWidth;this.viewportHeight=innerHeight;
+   this.atmosphere?.resize();
+  }
+  syncViewport(){if(this.viewportWidth!==innerWidth||this.viewportHeight!==innerHeight||this.viewportDpr!==(window.devicePixelRatio||1))this.resize();}
   look(dx,dy){this.yaw-=dx*.003;this.pitch=T.MathUtils.clamp(this.pitch-dy*.003,-1.15,.8);}
   screen(point){const v=point.clone().project(this.camera);return{x:(v.x*.5+.5)*innerWidth,y:(-.5*v.y+.5)*innerHeight,visible:v.z>=-1&&v.z<=1};}
   hitTest(x,y,sim){

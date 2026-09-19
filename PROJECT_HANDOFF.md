@@ -30,6 +30,17 @@ When resolving conflicting information, always follow this strict priority order
 
 ---
 
+## Browser item label and held-object alignment after resize during loading — 2026-09-19
+
+- **[USER VERIFIED CURRENT] Reported defect:** the online build sometimes showed item labels away from the visible props, and picked-up items could appear off-center. The supplied screenshot is the authoritative player-visible evidence of the defect; yesterday's acceptable session does not establish today's behavior.
+- **[AUTOMATED VERIFIED] Reproduced cause:** in the current source, the `resize` listener was registered only after `await world.ready`. A real Edge run started at 1920×1080 and resized to 1420×598 during loading. At readiness, the canvas remained 1920×1080 and the camera aspect remained 1.7778 while the HUD and label projection used 1420×598. Genuine pre-change evidence is `work/game/qa/label-alignment/before-resize-during-load/01-initial-short.png` with dimensions in the adjacent JSON file.
+- **[CURRENT BUILD NEEDS MANUAL CHECK] Fix:** `main.js` registers the resize listener immediately after World construction and synchronizes again after loading and before each frame. `world.js` records the active viewport, updates camera projection and renderer size whenever the viewport changes, and recalculates render pixel ratio if browser display scale changes. No item geometry or authored hand positions changed.
+- **[AUTOMATED VERIFIED] Real browser regression:** the same during-loading resize now leaves canvas/HUD at 1420×598 and camera aspect 2.37458. Low and High at device scale 1.25 both passed; held-bottle camera-local position settled at (-0.08, -0.15, -0.64) and remained fixed after a 0.45-radian camera rotation. Real runtime captures and JSON are under `work/game/qa/label-alignment/after-resize-during-load/` and `after-high-dpr/`; `compare.html` shows the matched pre/post resize view and held views. `scripts/verify-label-alignment.mjs` reproduces and asserts the viewport/hand invariants.
+- **[AUTOMATED VERIFIED] Gates:** `npm.cmd test` passed 121/121 and `npm.cmd run build` passed with 179 transformed modules. The targeted Edge runtime runs exited cleanly with no page errors. No FPS comparison was taken for this viewport correctness fix.
+- **[CURRENT BUILD NEEDS MANUAL CHECK] Additional regression gate:** `scripts/stability.mjs` was attempted against the new build, but Electron closed before `window.__game` became available; it produced zero cases, so its result is inconclusive. The real Edge held-object rotation check above passed. The immediate priority is a human online check after GitHub Pages deploy, including resize or browser zoom during loading and pickup after rotating the camera.
+
+---
+
 ## Beta 1 Release Deployment & Boot Quality Selector Fix — 2026-09-19
 **Status**: `[AUTOMATED VERIFIED: 121/121 TESTS PASS; DEPLOYED TO GITHUB PAGES; CURRENT BUILD NEEDS MANUAL CHECK]`
 
