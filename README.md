@@ -2,7 +2,7 @@
 
 > *A quiet forest ritual. A photorealistic first-person waterfall gravity simulation.*
 
-**ZNICZ** (formerly *Stillwater / Gravity Hit*) is a meditative, first-person ritual simulation set in a quiet, sunlit conifer forest beside a mountain stream. It meticulously recreates the authentic Polish "wodospad / tłok" (waterfall gravity bong) ritual with physical fidelity, tangible prop interactions, fluid outflow dynamics, and volumetric atmosphere.
+**ZNICZ** (Gravity Hit) is a meditative, first-person ritual simulation set in a quiet, sunlit conifer forest beside a mountain stream. It meticulously recreates the authentic Polish "wodospad / tłok" (waterfall gravity bong) ritual with physical fidelity, tangible prop interactions, fluid outflow dynamics, and volumetric atmosphere.
 
 ---
 
