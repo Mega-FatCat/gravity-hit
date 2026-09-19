@@ -88,10 +88,23 @@ $('scene').addEventListener('webglcontextlost',e=>{e.preventDefault();$('app').i
 const qualitySelect=$('boot-quality-select'),qualityNote=$('boot-quality-note');
 const updateBootQuality=()=>{const detected=world.qualityDecision.automatic.quality,label=detected[0].toUpperCase()+detected.slice(1),active=world.profile.label;qualityNote.textContent=settings.quality==='auto'?`Recommended ${label} · loading ${active}`:`Selected ${active} · automatic recommends ${label}`;};
 qualitySelect.value=settings.quality;updateBootQuality();
+let worldStarted=false;
+qualitySelect.onchange=async()=>{
+ const mode=qualitySelect.value;
+ settings.quality=mode;
+ save();
+ if(!worldStarted){
+  world.setQuality(mode);
+  updateBootQuality();
+  return;
+ }
+ await changeQuality(mode);
+};
 await new Promise(resolve=>{
- let resolved=false;const beginLoad=()=>{if(resolved)return;resolved=true;qualitySelect.disabled=true;resolve();};
- const timer=setTimeout(beginLoad,(isQa||qualityTransition)?0:1200);
- qualitySelect.onchange=()=>{clearTimeout(timer);settings.quality=qualitySelect.value;world.setQuality(settings.quality);updateBootQuality();save();beginLoad();};
+ let resolved=false;
+ const beginLoad=()=>{if(resolved)return;resolved=true;worldStarted=true;resolve();};
+ const timer=setTimeout(beginLoad,(isQa||qualityTransition)?0:3000);
+ qualitySelect.addEventListener('change',()=>{clearTimeout(timer);beginLoad();},{once:true});
 });
 world.start();
 await world.ready;
